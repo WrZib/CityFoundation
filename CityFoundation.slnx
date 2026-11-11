@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CityFoundation/CityFoundation.csproj" Id="07bc668e-fcc1-475b-8e84-d0d2ca91fb67" />
+  <Project Path="Library/Library.csproj" />
+</Solution>
