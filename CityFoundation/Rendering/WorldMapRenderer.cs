@@ -12,7 +12,14 @@ namespace CityFoundation.Rendering;
 
 public class WorldMapRenderer
 {
-    private const int CellPixelSize = 1;
+    private const double CellPixelSize = 0.5;
+
+    private const double MinZoom = 0.5;
+    private const double MaxZoom = 24;
+    private const double InitialZoom = 3;
+
+    private const double TileGridZoom = 0.7;
+    private const double ConstructionGridZoom = 3;
 
     private readonly Canvas viewport;
     private readonly Canvas content;
@@ -20,8 +27,10 @@ public class WorldMapRenderer
     private readonly ScaleTransform scale = new();
     private readonly TranslateTransform translate = new();
 
+    private Rectangle? constructionGrid;
+    private Panel? tileGrid;
+
     private World? currentWorld;
-    private ConstructionGrid? constructionGrid;
 
     private bool isDragging;
     private Point lastMousePosition;
@@ -31,11 +40,17 @@ public class WorldMapRenderer
         this.viewport = viewport;
         this.content = content;
 
-        TransformGroup transforms = new();
-        transforms.Children.Add(scale);
-        transforms.Children.Add(translate);
+        TransformGroup transform = new();
+        transform.Children.Add(scale);
+        transform.Children.Add(translate);
 
-        content.RenderTransform = transforms;
+        content.RenderTransform = transform;
+
+        viewport.ClipToBounds = true;
+
+        RenderOptions.SetBitmapScalingMode(
+            content,
+            BitmapScalingMode.Fant);
 
         viewport.MouseLeftButtonDown += OnMouseDown;
         viewport.MouseLeftButtonUp += OnMouseUp;
@@ -52,10 +67,9 @@ public class WorldMapRenderer
     public void SetWorld(World world)
     {
         currentWorld = world;
-        constructionGrid = new ConstructionGrid(world);
 
-        scale.ScaleX = 3;
-        scale.ScaleY = 3;
+        scale.ScaleX = InitialZoom;
+        scale.ScaleY = InitialZoom;
 
         Draw();
 
@@ -71,61 +85,89 @@ public class WorldMapRenderer
 
         content.Children.Clear();
 
-        int mapWidth =
-            currentWorld.TotalCellWidth * CellPixelSize;
+        constructionGrid = null;
+        tileGrid = null;
 
-        int mapHeight =
-            currentWorld.TotalCellHeight * CellPixelSize;
+        int tileCells =
+            WorldTile.ChunkCount * WorldChunk.Size;
 
-        content.Width = mapWidth;
-        content.Height = mapHeight;
+        double tileSize = tileCells * CellPixelSize;
+
+        content.Width = currentWorld.TotalCellWidth * CellPixelSize;
+        content.Height = currentWorld.TotalCellHeight * CellPixelSize;
 
         // Отрисовка тайлов
-        for (int tileX = 0; tileX < currentWorld.Width; tileX++)
+        for (int x = 0; x < currentWorld.Width; x++)
         {
-            for (int tileY = 0; tileY < currentWorld.Height; tileY++)
+            for (int y = 0; y < currentWorld.Height; y++)
             {
-                WorldTile tile = currentWorld.Tiles[tileX, tileY];
-
-                WriteableBitmap bitmap = CreateTileBitmap(tile);
+                WriteableBitmap bitmap =
+                    CreateTileBitmap(currentWorld.Tiles[x, y]);
 
                 Image image = new()
                 {
                     Source = bitmap,
-                    Width = WorldTile.ChunkCount *
-                            WorldChunk.Size * CellPixelSize,
-                    Height = WorldTile.ChunkCount *
-                             WorldChunk.Size * CellPixelSize,
+                    Width = tileSize,
+                    Height = tileSize,
                     Stretch = Stretch.Fill,
-                    IsHitTestVisible = false
+                    IsHitTestVisible = false,
+                    SnapsToDevicePixels = true
                 };
 
-                double tileLeft =
-                    tileX * WorldTile.ChunkCount *
-                    WorldChunk.Size * CellPixelSize;
+                RenderOptions.SetBitmapScalingMode(
+                    image,
+                    BitmapScalingMode.Fant);
 
-                double tileTop =
-                    tileY * WorldTile.ChunkCount *
-                    WorldChunk.Size * CellPixelSize;
-
-                Canvas.SetLeft(image, tileLeft);
-                Canvas.SetTop(image, tileTop);
+                Canvas.SetLeft(image, x * tileSize);
+                Canvas.SetTop(image, y * tileSize);
 
                 content.Children.Add(image);
             }
         }
 
-        // Строительная сетка
+        DrawTileGrid(tileSize);
         DrawConstructionGrid();
 
-        // Границы тайлов
-        DrawTileGrid(mapWidth, mapHeight);
+        UpdateLod();
     }
 
+    // Создание текстуры тайла
     private WriteableBitmap CreateTileBitmap(WorldTile tile)
     {
-        int size =
-            WorldTile.ChunkCount * WorldChunk.Size;
+        int size = WorldTile.ChunkCount * WorldChunk.Size;
+
+        int stride = size * 4;
+        byte[] pixels = new byte[size * stride];
+
+        for (int y = 0; y < size; y++)
+        {
+            int chunkY = y / WorldChunk.Size;
+            int cellY = y % WorldChunk.Size;
+
+            for (int x = 0; x < size; x++)
+            {
+                int chunkX = x / WorldChunk.Size;
+                int cellX = x % WorldChunk.Size;
+
+                ChunkCell cell =
+                    tile.Chunks[chunkX, chunkY]
+                        .Cells[cellX, cellY];
+
+                Color color = GetTerrainColor(cell);
+
+                color = ApplySlopeShading(
+                    color,
+                    cell.Slope,
+                    cell.Height);
+
+                int index = y * stride + x * 4;
+
+                pixels[index] = color.B;
+                pixels[index + 1] = color.G;
+                pixels[index + 2] = color.R;
+                pixels[index + 3] = 255;
+            }
+        }
 
         WriteableBitmap bitmap = new(
             size,
@@ -135,93 +177,34 @@ public class WorldMapRenderer
             PixelFormats.Bgra32,
             null);
 
-        int stride = size * 4;
-        byte[] pixels = new byte[size * size * 4];
-
-        for (int chunkX = 0;
-             chunkX < WorldTile.ChunkCount;
-             chunkX++)
-        {
-            for (int chunkY = 0;
-                 chunkY < WorldTile.ChunkCount;
-                 chunkY++)
-            {
-                WorldChunk chunk =
-                    tile.Chunks[chunkX, chunkY];
-
-                for (int cellX = 0;
-                     cellX < WorldChunk.Size;
-                     cellX++)
-                {
-                    for (int cellY = 0;
-                         cellY < WorldChunk.Size;
-                         cellY++)
-                    {
-                        ChunkCell cell =
-                            chunk.Cells[cellX, cellY];
-
-                        int x =
-                            chunkX * WorldChunk.Size + cellX;
-
-                        int y =
-                            chunkY * WorldChunk.Size + cellY;
-
-                        Color color = GetTerrainColor(cell);
-
-                        color = ApplySlopeShading(
-                            color,
-                            cell.Slope,
-                            cell.Height);
-
-                        int index = y * stride + x * 4;
-
-                        pixels[index] = color.B;
-                        pixels[index + 1] = color.G;
-                        pixels[index + 2] = color.R;
-                        pixels[index + 3] = 255;
-                    }
-                }
-            }
-        }
-
         bitmap.WritePixels(
             new Int32Rect(0, 0, size, size),
             pixels,
             stride,
             0);
 
+        bitmap.Freeze();
+
         return bitmap;
     }
 
+    // Цвет биома
     private Color GetTerrainColor(ChunkCell cell)
     {
         return cell.Terrain switch
         {
-            TerrainType.Water =>
-                GetWaterColor(cell.Height),
-
-            TerrainType.Plains =>
-                GetPlainsColor(cell.Height),
-
-            TerrainType.Forest =>
-                GetForestColor(cell.Height),
-
-            TerrainType.Hills =>
-                GetHillColor(cell.Height),
-
-            TerrainType.Mountains =>
-                GetMountainColor(cell.Height),
-
+            TerrainType.Water => GetWaterColor(cell.Height),
+            TerrainType.Plains => GetPlainsColor(cell.Height),
+            TerrainType.Forest => GetForestColor(cell.Height),
+            TerrainType.Hills => GetHillColor(cell.Height),
+            TerrainType.Mountains => GetMountainColor(cell.Height),
             _ => Colors.Magenta
         };
     }
 
     private Color GetWaterColor(float height)
     {
-        double depth = Math.Clamp(
-            Math.Abs(height) / 45.0,
-            0,
-            1);
+        double depth = Math.Clamp(Math.Abs(height) / 45.0, 0, 1);
 
         return Blend(
             Color.FromRgb(125, 190, 195),
@@ -261,10 +244,7 @@ public class WorldMapRenderer
 
     private Color GetMountainColor(float height)
     {
-        double elevation = Math.Clamp(
-            height / 3000.0,
-            0,
-            1);
+        double elevation = Math.Clamp(height / 3000.0, 0, 1);
 
         if (elevation < 0.65)
         {
@@ -288,10 +268,7 @@ public class WorldMapRenderer
         if (height < 0)
             return color;
 
-        double shade = Math.Clamp(
-            slope / 60.0,
-            0,
-            0.22);
+        double shade = Math.Clamp(slope / 60.0, 0, 0.22);
 
         return Blend(
             color,
@@ -299,10 +276,7 @@ public class WorldMapRenderer
             shade);
     }
 
-    private Color Blend(
-        Color first,
-        Color second,
-        double amount)
+    private Color Blend(Color first, Color second, double amount)
     {
         amount = Math.Clamp(amount, 0, 1);
 
@@ -312,69 +286,35 @@ public class WorldMapRenderer
             (byte)(first.B + (second.B - first.B) * amount));
     }
 
-    private void DrawConstructionGrid()
+    // Сетка тайлов
+    private void DrawTileGrid(double tileSize)
     {
-        if (constructionGrid == null || currentWorld == null)
+        if (currentWorld == null)
             return;
 
-        int cellSize = ConstructionGrid.CellSize;
-
-        int mapWidth = currentWorld.TotalCellWidth;
-        int mapHeight = currentWorld.TotalCellHeight;
-
-        GeometryGroup geometry = new();
-
-        for (int x = 0; x <= mapWidth; x += cellSize)
+        Canvas grid = new()
         {
-            geometry.Children.Add(
-                new LineGeometry(
-                    new Point(x, 0),
-                    new Point(x, mapHeight)));
-        }
-
-        for (int y = 0; y <= mapHeight; y += cellSize)
-        {
-            geometry.Children.Add(
-                new LineGeometry(
-                    new Point(0, y),
-                    new Point(mapWidth, y)));
-        }
-
-        Path grid = new()
-        {
-            Data = geometry,
-            Stroke = new SolidColorBrush(
-                Color.FromArgb(90, 15, 22, 30)),
-            StrokeThickness = 0.6,
+            Width = content.Width,
+            Height = content.Height,
             IsHitTestVisible = false
         };
 
-        content.Children.Add(grid);
-    }
+        SolidColorBrush brush = new(
+            Color.FromArgb(210, 225, 230, 215));
 
-    // Границы крупных тайлов.
-    private void DrawTileGrid(int mapWidth, int mapHeight)
-    {
-        int tilePixelSize =
-            WorldChunk.Size *
-            WorldTile.ChunkCount *
-            CellPixelSize;
-
-        for (int x = 0; x <= currentWorld!.Width; x++)
+        for (int x = 0; x <= currentWorld.Width; x++)
         {
             Line line = new()
             {
-                X1 = x * tilePixelSize,
-                X2 = x * tilePixelSize,
+                X1 = x * tileSize,
+                X2 = x * tileSize,
                 Y1 = 0,
-                Y2 = mapHeight,
-                Stroke = new SolidColorBrush(
-                    Color.FromArgb(100, 25, 28, 32)),
-                StrokeThickness = 1,
-                IsHitTestVisible = false
+                Y2 = content.Height,
+                Stroke = brush,
+                StrokeThickness = 0.22
             };
 
-            content.Children.Add(line);
+            grid.Children.Add(line);
         }
 
         for (int y = 0; y <= currentWorld.Height; y++)
@@ -382,16 +322,96 @@ public class WorldMapRenderer
             Line line = new()
             {
                 X1 = 0,
-                X2 = mapWidth,
-                Y1 = y * tilePixelSize,
-                Y2 = y * tilePixelSize,
-                Stroke = new SolidColorBrush(
-                    Color.FromArgb(100, 25, 28, 32)),
-                StrokeThickness = 1,
-                IsHitTestVisible = false
+                X2 = content.Width,
+                Y1 = y * tileSize,
+                Y2 = y * tileSize,
+                Stroke = brush,
+                StrokeThickness = 0.22
             };
 
-            content.Children.Add(line);
+            grid.Children.Add(line);
+        }
+
+        Panel.SetZIndex(grid, 20);
+
+        content.Children.Add(grid);
+        tileGrid = grid;
+    }
+
+    // Строительная сетка
+    private void DrawConstructionGrid()
+    {
+        double cellSize =
+            ConstructionGrid.CellSize * CellPixelSize;
+
+        Pen pen = new(
+            new SolidColorBrush(
+                Color.FromArgb(105, 20, 29, 34)),
+            0.16);
+
+        pen.Freeze();
+
+        GeometryGroup geometry = new();
+
+        geometry.Children.Add(
+            new LineGeometry(
+                new Point(cellSize, 0),
+                new Point(cellSize, cellSize)));
+
+        geometry.Children.Add(
+            new LineGeometry(
+                new Point(0, cellSize),
+                new Point(cellSize, cellSize)));
+
+        geometry.Freeze();
+
+        GeometryDrawing drawing = new(null, pen, geometry);
+        drawing.Freeze();
+
+        DrawingBrush brush = new(drawing)
+        {
+            TileMode = TileMode.Tile,
+            Stretch = Stretch.None,
+            Viewbox = new Rect(0, 0, cellSize, cellSize),
+            ViewboxUnits = BrushMappingMode.Absolute,
+            Viewport = new Rect(0, 0, cellSize, cellSize),
+            ViewportUnits = BrushMappingMode.Absolute
+        };
+
+        brush.Freeze();
+
+        constructionGrid = new Rectangle
+        {
+            Width = content.Width,
+            Height = content.Height,
+            Fill = brush,
+            IsHitTestVisible = false
+        };
+
+        Panel.SetZIndex(constructionGrid, 10);
+
+        content.Children.Add(constructionGrid);
+    }
+
+    // LOD сеток
+    private void UpdateLod()
+    {
+        double zoom = scale.ScaleX;
+
+        if (tileGrid != null)
+        {
+            tileGrid.Visibility =
+                zoom >= TileGridZoom
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+
+        if (constructionGrid != null)
+        {
+            constructionGrid.Visibility =
+                zoom >= ConstructionGridZoom
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
         }
     }
 
@@ -411,6 +431,9 @@ public class WorldMapRenderer
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+
         isDragging = true;
         lastMousePosition = e.GetPosition(viewport);
 
@@ -420,6 +443,9 @@ public class WorldMapRenderer
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+
         isDragging = false;
         viewport.ReleaseMouseCapture();
         Mouse.OverrideCursor = null;
@@ -441,21 +467,26 @@ public class WorldMapRenderer
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        double zoom = e.Delta > 0 ? 1.1 : 0.9;
-        double newScale = scale.ScaleX * zoom;
+        double factor = e.Delta > 0 ? 1.12 : 1.0 / 1.12;
 
-        if (newScale < 0.5 || newScale > 24)
-            return;
+        double newZoom = Math.Clamp(
+            scale.ScaleX * factor,
+            MinZoom,
+            MaxZoom);
+
+        double actualFactor = newZoom / scale.ScaleX;
 
         Point mouse = e.GetPosition(viewport);
 
         translate.X =
-            mouse.X - (mouse.X - translate.X) * zoom;
+            mouse.X - (mouse.X - translate.X) * actualFactor;
 
         translate.Y =
-            mouse.Y - (mouse.Y - translate.Y) * zoom;
+            mouse.Y - (mouse.Y - translate.Y) * actualFactor;
 
-        scale.ScaleX = newScale;
-        scale.ScaleY = newScale;
+        scale.ScaleX = newZoom;
+        scale.ScaleY = newZoom;
+
+        UpdateLod();
     }
 }

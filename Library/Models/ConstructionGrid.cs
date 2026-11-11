@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 
 namespace Library.Models;
 
@@ -7,7 +6,7 @@ public class ConstructionGrid
 {
     private readonly World world;
 
-    public const int CellSize = 5;
+    public const int CellSize = 10;
 
     public ConstructionGrid(World world)
     {

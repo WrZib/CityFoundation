@@ -33,8 +33,7 @@ public partial class MainWindow : Window
         currentWorld = generator.Generate(
             seed,
             3,
-            3,
-            2);
+            3);
 
         renderer?.SetWorld(currentWorld);
     }

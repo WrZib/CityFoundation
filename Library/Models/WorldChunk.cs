@@ -5,7 +5,7 @@ namespace Library.Models;
 
 public class WorldChunk
 {
-    public const int Size = 32;
+    public const int Size = 64;
 
     public int X { get; set; }
     public int Y { get; set; }

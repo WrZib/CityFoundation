@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Library.Models;
 
@@ -7,37 +6,24 @@ namespace Library.Generation;
 
 public class WorldGenerator
 {
-    private TerrainGenerator terrainGenerator = null!;
-    private BiomeGenerator biomeGenerator = null!;
-
-    private int totalCellWidth;
-    private int totalCellHeight;
-
-    private double cellSizeMeters;
-
     public World Generate(
         int seed,
         int width = 3,
-        int height = 3,
-        double tileSizeKm = 2)
+        int height = 3)
     {
         if (width <= 0 || height <= 0)
             throw new ArgumentException(
                 "Размер мира должен быть положительным.");
 
-        terrainGenerator = new TerrainGenerator(seed);
-        biomeGenerator = new BiomeGenerator();
+        World world = new(seed, width, height);
 
-        World world = new(
-            seed,
-            width,
-            height);
+        TerrainGenerator terrainGenerator = new(seed);
+        BiomeGenerator biomeGenerator = new();
 
-        totalCellWidth = world.TotalCellWidth;
-        totalCellHeight = world.TotalCellHeight;
+        int worldWidth = world.TotalCellWidth;
+        int worldHeight = world.TotalCellHeight;
 
-        cellSizeMeters =
-            tileSizeKm * 1000 /
+        double cellSizeMeters = world.TileSizeKm * 1000.0 /
             (WorldTile.ChunkCount * WorldChunk.Size);
 
         for (int x = 0; x < width; x++)
@@ -48,163 +34,120 @@ public class WorldGenerator
             }
         }
 
-        int totalChunkColumns =
-            width * WorldTile.ChunkCount;
+        ChunkCell[,] cells = new ChunkCell[worldWidth, worldHeight];
 
-        int totalChunkRows =
-            height * WorldTile.ChunkCount;
-
-        Parallel.For(
-            0,
-            totalChunkColumns,
-            globalChunkX =>
-            {
-                int tileX =
-                    globalChunkX / WorldTile.ChunkCount;
-
-                int localChunkX =
-                    globalChunkX % WorldTile.ChunkCount;
-
-                for (int globalChunkY = 0;
-                     globalChunkY < totalChunkRows;
-                     globalChunkY++)
-                {
-                    int tileY =
-                        globalChunkY / WorldTile.ChunkCount;
-
-                    int localChunkY =
-                        globalChunkY % WorldTile.ChunkCount;
-
-                    WorldChunk chunk = GenerateChunk(
-                        globalChunkX,
-                        globalChunkY);
-
-                    world.Tiles[tileX, tileY]
-                        .Chunks[localChunkX, localChunkY] = chunk;
-                }
-            });
-
-        return world;
-    }
-
-    private WorldChunk GenerateChunk(
-        int globalChunkX,
-        int globalChunkY)
-    {
-        WorldChunk chunk = new(
-            globalChunkX,
-            globalChunkY);
-
-        int startX =
-            globalChunkX * WorldChunk.Size;
-
-        int startY =
-            globalChunkY * WorldChunk.Size;
-
-        ChunkCell[,] extendedCells = new ChunkCell[
-            WorldChunk.Size + 2,
-            WorldChunk.Size + 2];
-
-        for (int x = -1; x <= WorldChunk.Size; x++)
+        Parallel.For(0, worldWidth, x =>
         {
-            for (int y = -1; y <= WorldChunk.Size; y++)
+            for (int y = 0; y < worldHeight; y++)
             {
-                int worldX = Math.Clamp(
-                    startX + x,
-                    0,
-                    totalCellWidth - 1);
-
-                int worldY = Math.Clamp(
-                    startY + y,
-                    0,
-                    totalCellHeight - 1);
-
-                extendedCells[x + 1, y + 1] =
-                    GenerateCell(worldX, worldY);
+                cells[x, y] = GenerateCell(
+                    terrainGenerator,
+                    biomeGenerator,
+                    x,
+                    y);
             }
-        }
+        });
 
-        for (int x = 0; x < WorldChunk.Size; x++)
+        Parallel.For(0, worldWidth, x =>
         {
-            for (int y = 0; y < WorldChunk.Size; y++)
+            int leftX = Math.Max(0, x - 1);
+            int rightX = Math.Min(worldWidth - 1, x + 1);
+
+            for (int y = 0; y < worldHeight; y++)
             {
-                ChunkCell cell =
-                    extendedCells[x + 1, y + 1];
+                int topY = Math.Max(0, y - 1);
+                int bottomY = Math.Min(worldHeight - 1, y + 1);
 
-                float left =
-                    extendedCells[x, y + 1].Height;
+                ChunkCell cell = cells[x, y];
 
-                float right =
-                    extendedCells[x + 2, y + 1].Height;
+                double dx =
+                    (cells[rightX, y].Height - cells[leftX, y].Height) /
+                    Math.Max(1, rightX - leftX);
 
-                float top =
-                    extendedCells[x + 1, y].Height;
-
-                float bottom =
-                    extendedCells[x + 1, y + 2].Height;
-
-                double dx = (right - left) / 2.0;
-                double dy = (bottom - top) / 2.0;
+                double dy =
+                    (cells[x, bottomY].Height - cells[x, topY].Height) /
+                    Math.Max(1, bottomY - topY);
 
                 double slopeRadians = Math.Atan(
-                    Math.Sqrt(dx * dx + dy * dy) /
-                    cellSizeMeters);
+                    Math.Sqrt(dx * dx + dy * dy) / cellSizeMeters);
 
                 cell.Slope = (float)(
-                    slopeRadians * 180 / Math.PI);
+                    slopeRadians * 180.0 / Math.PI);
 
                 cell.IsBuildable =
                     cell.Terrain != TerrainType.Water &&
                     cell.Terrain != TerrainType.Mountains &&
                     cell.Slope <= 8;
 
-                chunk.Cells[x, y] = cell;
+                cells[x, y] = cell;
             }
-        }
+        });
 
-        return chunk;
+        int chunksWide = width * WorldTile.ChunkCount;
+        int chunksHigh = height * WorldTile.ChunkCount;
+        int totalChunks = chunksWide * chunksHigh;
+
+        Parallel.For(0, totalChunks, index =>
+        {
+            int globalChunkX = index / chunksHigh;
+            int globalChunkY = index % chunksHigh;
+
+            int tileX = globalChunkX / WorldTile.ChunkCount;
+            int tileY = globalChunkY / WorldTile.ChunkCount;
+
+            int localChunkX = globalChunkX % WorldTile.ChunkCount;
+            int localChunkY = globalChunkY % WorldTile.ChunkCount;
+
+            WorldChunk chunk = new(globalChunkX, globalChunkY);
+
+            int startX = globalChunkX * WorldChunk.Size;
+            int startY = globalChunkY * WorldChunk.Size;
+
+            for (int x = 0; x < WorldChunk.Size; x++)
+            {
+                for (int y = 0; y < WorldChunk.Size; y++)
+                {
+                    chunk.Cells[x, y] = cells[startX + x, startY + y];
+                }
+            }
+
+            world.Tiles[tileX, tileY]
+                .Chunks[localChunkX, localChunkY] = chunk;
+        });
+
+        return world;
     }
 
-
-
-    private ChunkCell GenerateCell(int worldX, int worldY)
+    private static ChunkCell GenerateCell(
+        TerrainGenerator generator,
+        BiomeGenerator biomeGenerator,
+        int x,
+        int y)
     {
-        double elevation =
-            terrainGenerator.GetElevation(worldX, worldY);
+        TerrainNoiseSample sample = generator.Sample(x, y);
 
-        double moisture =
-            terrainGenerator.GetMoisture(worldX, worldY);
-
-        double lakeNoise =
-            terrainGenerator.GetLakeNoise(worldX, worldY);
-
-        // Генерация озёр.
         bool isLake =
-            elevation < 0.62 &&
-            lakeNoise > 0.58;
+            sample.Elevation < 0.62 &&
+            sample.Lake > 0.58;
 
         if (isLake)
         {
-            double depth =
-                3 + (lakeNoise - 0.58) * 35;
+            float depth = (float)(
+                3 + (sample.Lake - 0.58) * 35);
 
             return new ChunkCell(
-                (float)-depth,
+                -depth,
                 TerrainType.Water);
         }
 
         TerrainType terrain = biomeGenerator.Generate(
-            elevation,
-            moisture,
+            sample.Elevation,
+            sample.Moisture,
             false);
 
-        float cellHeight =
-            terrainGenerator.GetHeightMeters(elevation);
+        float height = generator.GetHeightMeters(
+            sample.Elevation);
 
-        return new ChunkCell(
-            cellHeight,
-            terrain);
+        return new ChunkCell(height, terrain);
     }
-
-
 }
