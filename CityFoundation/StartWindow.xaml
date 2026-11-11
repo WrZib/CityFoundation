@@ -1,0 +1,144 @@
+﻿<Window x:Class="CityFoundation.StartWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CitySim — Стартовое меню"
+        Height="560" Width="900"
+        MinHeight="480" MinWidth="700"
+        Background="#0A0E14"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid>
+        <!-- ============ ГЛАВНАЯ СТАРТОВАЯ СТРАНИЦА ============ -->
+        <StackPanel x:Name="MainMenuPanel"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+
+            <TextBlock Text="CITY SIMULATOR"
+                       FontSize="46" FontWeight="Bold"
+                       Foreground="#E6EAF0"
+                       HorizontalAlignment="Center"/>
+
+            <TextBlock Text="Городская симуляция"
+                       FontSize="16" Foreground="#8892A0"
+                       HorizontalAlignment="Center"
+                       Margin="0,5,0,50"/>
+
+            <Button x:Name="CreateWorldButton"
+                    Width="320" Height="55" Margin="0,0,0,15"
+                    FontSize="18" FontWeight="SemiBold"
+                    Background="#3B82F6" Foreground="#0A0E14"
+                    BorderThickness="0" Cursor="Hand"
+                    Click="CreateWorldButton_Click">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="🌍" FontFamily="Segoe UI Emoji"
+                               FontSize="22" Margin="0,0,10,0"/>
+                    <TextBlock Text="Создать мир" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <Button x:Name="LoadWorldButton"
+                    Width="320" Height="55" Margin="0,0,0,15"
+                    FontSize="18" FontWeight="SemiBold"
+                    Background="#1A1F26" Foreground="#E6EAF0"
+                    BorderBrush="#2A313B" BorderThickness="1"
+                    Cursor="Hand"
+                    Click="LoadWorldButton_Click">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="📂" FontFamily="Segoe UI Emoji"
+                               FontSize="22" Margin="0,0,10,0"/>
+                    <TextBlock Text="Выбрать из существующих" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <Button x:Name="ExitButton"
+                    Width="320" Height="55"
+                    FontSize="18" FontWeight="SemiBold"
+                    Background="#1A1F26" Foreground="#8892A0"
+                    BorderBrush="#2A313B" BorderThickness="1"
+                    Cursor="Hand"
+                    Click="ExitButton_Click">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="Выход" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <!-- ============ ПАНЕЛЬ ВЫБОРА СУЩЕСТВУЮЩЕГО МИРА ============ -->
+        <Grid x:Name="WorldSelectionPanel"
+              Background="#0A0E14"
+              Visibility="Collapsed">
+
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0"
+                       Text="Выбор мира"
+                       FontSize="32" FontWeight="Bold"
+                       Foreground="#E6EAF0"
+                       HorizontalAlignment="Center"
+                       Margin="0,25,0,20"/>
+
+            <ListBox x:Name="WorldsList"
+                     Grid.Row="1"
+                     Margin="50,0,50,15"
+                     Background="#12161C"
+                     Foreground="#E6EAF0"
+                     FontSize="16"
+                     BorderBrush="#2A313B"
+                     BorderThickness="1"
+                     Padding="5">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="5">
+                            <TextBlock Text="🗺 " Foreground="#3B82F6"
+                                       FontFamily="Segoe UI Emoji" FontSize="18"/>
+                            <TextBlock Text="{Binding Name}"
+                                       Foreground="#E6EAF0"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock Text=" — " Foreground="#8892A0"/>
+                            <TextBlock Text="{Binding LastModified}"
+                                       Foreground="#8892A0" FontSize="13"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock x:Name="NoWorldsMessage"
+                       Grid.Row="1"
+                       Text="Нет сохранённых миров.&#x0a;Создайте новый мир в главном меню."
+                       FontSize="18"
+                       Foreground="#8892A0"
+                       TextAlignment="Center"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="Collapsed"/>
+
+            <StackPanel Grid.Row="2"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,25">
+
+                <Button x:Name="LoadSelectedButton"
+                        Content="Загрузить"
+                        Width="180" Height="48" Margin="0,0,15,0"
+                        FontSize="16" FontWeight="SemiBold"
+                        Background="#3B82F6" Foreground="#0A0E14"
+                        BorderThickness="0" Cursor="Hand"
+                        Click="LoadSelectedButton_Click"/>
+
+                <Button x:Name="BackButton"
+                        Content="← Назад"
+                        Width="180" Height="48"
+                        FontSize="16" FontWeight="SemiBold"
+                        Background="#1A1F26" Foreground="#E6EAF0"
+                        BorderBrush="#2A313B" BorderThickness="1"
+                        Cursor="Hand"
+                        Click="BackButton_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

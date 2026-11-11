@@ -1,21 +1,306 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Window x:Class="CityFoundation.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="CitySim"
-        Width="1200"
-        Height="800"
-        MinWidth="800"
-        MinHeight="600"
-        Background="Black"
-        WindowStartupLocation="CenterScreen">
+        Width="1280" Height="840"
+        MinWidth="1024" MinHeight="680"
+        Background="#0A0E14"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing"
+        Loaded="OnWindowLoaded">
 
-    <Canvas x:Name="MapViewport"
-            Background="Black"
-            ClipToBounds="True">
+    <Window.Resources>
+        <!-- Палитра -->
+        <SolidColorBrush x:Key="BgDeepBrush"      Color="#0A0E14"/>
+        <SolidColorBrush x:Key="BgMainBrush"      Color="#12161C"/>
+        <SolidColorBrush x:Key="BgElevatedBrush"  Color="#1A1F26"/>
+        <SolidColorBrush x:Key="BgHoverBrush"     Color="#232932"/>
+        <SolidColorBrush x:Key="BorderBrush"      Color="#2A313B"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E6EAF0"/>
+        <SolidColorBrush x:Key="TextMutedBrush"   Color="#8892A0"/>
+        <SolidColorBrush x:Key="AccentBrush"      Color="#3B82F6"/>
+        <SolidColorBrush x:Key="DangerBrush"      Color="#DC2626"/>
 
-        <Canvas x:Name="MapContent"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"/>
+        <!-- Полупрозрачные подложки HUD -->
+        <SolidColorBrush x:Key="HudPanelBrush"    Color="#E612161C"/>
+        <SolidColorBrush x:Key="HudHoverBrush"    Color="#EE1A1F26"/>
 
-    </Canvas>
+        <!-- ================= ВЕРХНЕЕ МЕНЮ ================= -->
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding"    Value="14,6"/>
+            <Setter Property="FontSize"   Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter Grid.Column="0" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+                                <Path x:Name="Arrow" Grid.Column="1" Data="M 0 0 L 4 4 L 0 8 Z" Fill="{StaticResource TextMutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="10,0,0,0" Visibility="Collapsed"/>
+                                <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Bottom">
+                                    <Border Background="{StaticResource BgElevatedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,4,0,0">
+                                        <Border.Effect>
+                                            <DropShadowEffect Color="Black" Opacity="0.6" BlurRadius="10" ShadowDepth="3"/>
+                                        </Border.Effect>
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuItem">
+                                <Setter Property="Padding" Value="10,6"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="4,2"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= КНОПКИ ВРЕМЕНИ ================= -->
+        <Style x:Key="TimeButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= КНОПКИ КАТЕГОРИЙ ================= -->
+        <Style x:Key="CategoryButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgHoverBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= КНОПКИ ИНСТРУМЕНТОВ ================= -->
+        <Style x:Key="SubmenuButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="#0A0E14"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <!-- 1. КАРТА -->
+        <Canvas x:Name="MapViewport" Background="{StaticResource BgDeepBrush}" ClipToBounds="True">
+            <Canvas x:Name="MapContent" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+        </Canvas>
+
+        <!-- 2. ИНТЕРФЕЙС -->
+        <Grid>
+            <!-- ВЕРХНЕЕ МЕНЮ -->
+            <Border VerticalAlignment="Top" Background="{StaticResource HudPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,2">
+                <Menu Background="Transparent" Foreground="{StaticResource TextPrimaryBrush}">
+                    <MenuItem Header="Игра">
+                        <MenuItem Header="Новый мир"    Click="NewWorldMenuItem_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Сохранить"    Click="SaveMenuItem_Click"/>
+                        <MenuItem Header="Загрузить..." Click="LoadMenuItem_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Выход"        Click="ExitMenuItem_Click" Foreground="{StaticResource DangerBrush}"/>
+                    </MenuItem>
+                    <MenuItem Header="Вид">
+                        <MenuItem Header="Показать сетку" IsCheckable="True" IsChecked="True"/>
+                    </MenuItem>
+                    <MenuItem Header="Помощь">
+                        <MenuItem Header="О программе" Click="AboutMenuItem_Click"/>
+                    </MenuItem>
+                </Menu>
+            </Border>
+
+            <!-- РЕСУРСЫ -->
+            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,50,15,0">
+                <Border Background="{StaticResource HudPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="15,10" Margin="0,0,0,10" Width="180">
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" Opacity="0.4" BlurRadius="12" ShadowDepth="3"/>
+                    </Border.Effect>
+                    <StackPanel>
+                        <TextBlock Text="ДЕНЬГИ" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock x:Name="MoneyText" Text="100 000" Foreground="{StaticResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource HudPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="15,10" Width="180">
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" Opacity="0.4" BlurRadius="12" ShadowDepth="3"/>
+                    </Border.Effect>
+                    <StackPanel>
+                        <TextBlock Text="НАСЕЛЕНИЕ" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock x:Name="PopulationText" Text="0" Foreground="{StaticResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- НИЖНЯЯ КОНСОЛЬ -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,15">
+                <Border x:Name="SubMenuBorder" Visibility="Collapsed" 
+                        Background="{StaticResource HudPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" Opacity="0.5" BlurRadius="15" ShadowDepth="3"/>
+                    </Border.Effect>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="SubMenuTitle" Text="" Foreground="{StaticResource AccentBrush}" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                        <WrapPanel x:Name="SubMenuPanel" Orientation="Horizontal"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{StaticResource HudPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="8" MinWidth="800">
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" Opacity="0.5" BlurRadius="15" ShadowDepth="3"/>
+                    </Border.Effect>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,10,0">
+                            <TextBlock x:Name="GameDateText" Text="01.01.2000" Foreground="{StaticResource TextPrimaryBrush}" 
+                                       FontSize="14" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                            <Button x:Name="PauseButton" Content="Пауза" Width="55" Height="28" FontSize="12"
+                                    Background="{StaticResource BgElevatedBrush}" Foreground="{StaticResource TextPrimaryBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Cursor="Hand" Margin="0,0,8,0" Click="PauseButton_Click"/>
+                            <Button x:Name="Speed1Button" Content="x1" Style="{StaticResource TimeButtonStyle}" 
+                                    Background="{StaticResource AccentBrush}" Foreground="#0A0E14" Click="Speed1Button_Click"/>
+                            <Button x:Name="Speed2Button" Content="x2" Style="{StaticResource TimeButtonStyle}" Click="Speed2Button_Click"/>
+                            <Button x:Name="Speed3Button" Content="x4" Style="{StaticResource TimeButtonStyle}" Click="Speed3Button_Click"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Width="1" Background="{StaticResource BorderBrush}" Margin="10,4,10,4"/>
+
+                        <WrapPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                            <Button Content="Дороги"          Tag="Roads"      Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Жильё"           Tag="Housing"    Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Промышленность"  Tag="Industry"   Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="ЖКХ"             Tag="Utilities"  Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Службы"          Tag="Services"   Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Природа"         Tag="Nature"     Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Население"       Tag="Population" Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                            <Button Content="Экономика"       Tag="Economy"    Click="CategoryButton_Click" Style="{StaticResource CategoryButtonStyle}"/>
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- ОВЕРЛЕЙ ЗАГРУЗКИ -->
+            <Grid x:Name="LoadingOverlay" Background="#E60A0E14" Visibility="Collapsed" ZIndex="999">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock x:Name="LoadingText" 
+                               Text="Инициализация..." 
+                               Foreground="{StaticResource TextPrimaryBrush}" 
+                               FontSize="22" FontWeight="Bold" 
+                               HorizontalAlignment="Center" Margin="0,0,0,20"/>
+
+                    <!-- Кастомный бегающий прогрессбар -->
+                    <Border Width="300" Height="6" Background="#2A313B" CornerRadius="3" ClipToBounds="True">
+                        <Rectangle Width="120" Fill="{StaticResource AccentBrush}" RadiusX="3" RadiusY="3" HorizontalAlignment="Left">
+                            <Rectangle.RenderTransform>
+                                <TranslateTransform X="-120" />
+                            </Rectangle.RenderTransform>
+                            <Rectangle.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" 
+                                                             From="-120" To="300" Duration="0:0:1.2">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseInOut"/>
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Rectangle.Triggers>
+                        </Rectangle>
+                    </Border>
+                </StackPanel>
+            </Grid>
+
+        </Grid>
+    </Grid>
 </Window>
