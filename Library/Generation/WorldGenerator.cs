@@ -8,8 +8,8 @@ public class WorldGenerator
 {
     public World Generate(
         int seed,
-        int width = 3,
-        int height = 3)
+        int width = 5,
+        int height = 5)
     {
         if (width <= 0 || height <= 0)
             throw new ArgumentException(

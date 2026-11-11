@@ -6,7 +6,7 @@ public class ConstructionGrid
 {
     private readonly World world;
 
-    public const int CellSize = 10;
+    public const int CellSize = 5;
 
     public ConstructionGrid(World world)
     {

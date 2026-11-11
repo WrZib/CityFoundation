@@ -15,6 +15,7 @@ public class WorldChunk
     public WorldChunk()
     {
         Cells = new ChunkCell[Size, Size];
+
     }
 
     public WorldChunk(int x, int y) : this()

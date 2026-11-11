@@ -5,9 +5,9 @@ public class World
 {
     public int Seed { get; set; }
 
-    public int Width { get; set; } = 3;
+    public int Width { get; set; } = 5;
 
-    public int Height { get; set; } = 3;
+    public int Height { get; set; } = 5;
 
     public double TileSizeKm => WorldTile.SizeKm;
 
@@ -26,7 +26,7 @@ public class World
         Tiles = new WorldTile[Width, Height];
     }
 
-    public World(int seed, int width = 3, int height = 3)
+    public World(int seed, int width = 5, int height = 5)
     {
         Seed = seed;
         Width = width;

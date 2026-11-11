@@ -14,12 +14,14 @@ public class WorldMapRenderer
 {
     private const double CellPixelSize = 0.5;
 
-    private const double MinZoom = 0.5;
+    private const double MinZoom = 0.3;
     private const double MaxZoom = 24;
-    private const double InitialZoom = 3;
+    private const double InitialZoom = 1;
 
     private const double TileGridZoom = 0.7;
     private const double ConstructionGridZoom = 3;
+
+    private const double MaxMoveOffset = 0.35;
 
     private readonly Canvas viewport;
     private readonly Canvas content;
@@ -136,7 +138,7 @@ public class WorldMapRenderer
     {
         int size = WorldTile.ChunkCount * WorldChunk.Size;
 
-        int stride = size * 4;
+        int stride = size * 3;
         byte[] pixels = new byte[size * stride];
 
         for (int y = 0; y < size; y++)
@@ -160,12 +162,12 @@ public class WorldMapRenderer
                     cell.Slope,
                     cell.Height);
 
-                int index = y * stride + x * 4;
+                int index = y * stride + x * 3;
 
+                // BGR
                 pixels[index] = color.B;
                 pixels[index + 1] = color.G;
                 pixels[index + 2] = color.R;
-                pixels[index + 3] = 255;
             }
         }
 
@@ -174,7 +176,7 @@ public class WorldMapRenderer
             size,
             96,
             96,
-            PixelFormats.Bgra32,
+            PixelFormats.Bgr24,
             null);
 
         bitmap.WritePixels(
@@ -187,6 +189,7 @@ public class WorldMapRenderer
 
         return bitmap;
     }
+
 
     // Цвет биома
     private Color GetTerrainColor(ChunkCell cell)
@@ -260,21 +263,28 @@ public class WorldMapRenderer
             (elevation - 0.65) / 0.35);
     }
 
+
     private Color ApplySlopeShading(
-        Color color,
-        float slope,
-        float height)
+    Color color,
+    float slope,
+    float height)
     {
-        if (height < 0)
+        if (height < 0 || slope < 16)
             return color;
 
-        double shade = Math.Clamp(slope / 60.0, 0, 0.22);
+        double amount = Math.Clamp(
+            (slope - 16) / 20.0,
+            0,
+            1);
 
-        return Blend(
-            color,
-            Color.FromRgb(45, 45, 45),
-            shade);
+        amount *= 0.07;
+
+        return Color.FromRgb(
+            (byte)(color.R * (1 - amount)),
+            (byte)(color.G * (1 - amount)),
+            (byte)(color.B * (1 - amount)));
     }
+
 
     private Color Blend(Color first, Color second, double amount)
     {
@@ -451,6 +461,29 @@ public class WorldMapRenderer
         Mouse.OverrideCursor = null;
     }
 
+    private const double MinVisiblePart = 0.85;
+
+    private void ClampTranslation()
+    {
+        double mapWidth = content.Width * scale.ScaleX;
+        double mapHeight = content.Height * scale.ScaleY;
+
+        double viewWidth = viewport.ActualWidth;
+        double viewHeight = viewport.ActualHeight;
+
+        double visibleX = Math.Min(viewWidth, mapWidth) * MinVisiblePart;
+        double visibleY = Math.Min(viewHeight, mapHeight) * MinVisiblePart;
+
+        double minX = visibleX - mapWidth;
+        double maxX = viewWidth - visibleX;
+
+        double minY = visibleY - mapHeight;
+        double maxY = viewHeight - visibleY;
+
+        translate.X = Math.Clamp(translate.X, minX, maxX);
+        translate.Y = Math.Clamp(translate.Y, minY, maxY);
+    }
+
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (!isDragging)
@@ -461,6 +494,8 @@ public class WorldMapRenderer
 
         translate.X += difference.X;
         translate.Y += difference.Y;
+
+        ClampTranslation();
 
         lastMousePosition = position;
     }
@@ -487,6 +522,7 @@ public class WorldMapRenderer
         scale.ScaleX = newZoom;
         scale.ScaleY = newZoom;
 
+        ClampTranslation();
         UpdateLod();
     }
 }

@@ -23,8 +23,8 @@ public class TerrainGenerator
 
     public TerrainNoiseSample Sample(int x, int y)
     {
-        x /= 2;
-        y /= 2;
+        x /= 5;
+        y /= 5;
 
         double continental = continentalNoise.FractalNoise(
             x * 0.0018, y * 0.0018, 4, 0.5, 2.0);
@@ -53,7 +53,7 @@ public class TerrainGenerator
             x * 0.004 + 100, y * 0.004 + 100, 3);
 
         double lakeLarge = lakeNoise.FractalNoise(
-            x * 0.0018, y * 0.0018, 4, 0.5, 2.0);
+    x * 0.0018, y * 0.0018, 4, 0.5, 2.0);
 
         double lakeMedium = lakeDetailNoise.FractalNoise(
             x * 0.006, y * 0.006, 3, 0.5, 2.0);
@@ -61,9 +61,9 @@ public class TerrainGenerator
         double lakeFine = lakeNoise.FractalNoise(
             x * 0.018 + 500, y * 0.018 + 500, 2, 0.5, 2.0);
 
-        double lake = lakeLarge * 0.65 +
-                      lakeMedium * 0.25 +
-                      lakeFine * 0.10;
+        double lake = lakeLarge * 0.55 +
+                      lakeMedium * 0.30 +
+                      lakeFine * 0.15;
 
         return new TerrainNoiseSample(elevation, moisture, lake);
     }

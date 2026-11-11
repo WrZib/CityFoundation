@@ -1,8 +1,10 @@
-using System;
-using System.Windows;
+using CityFoundation.Rendering;
 using Library.Generation;
 using Library.Models;
-using CityFoundation.Rendering;
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Windows;
 
 namespace CityFoundation;
 
@@ -32,8 +34,8 @@ public partial class MainWindow : Window
 
         currentWorld = generator.Generate(
             seed,
-            3,
-            3);
+            5,
+            5);
 
         renderer?.SetWorld(currentWorld);
     }
