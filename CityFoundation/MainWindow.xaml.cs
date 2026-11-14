@@ -1,14 +1,9 @@
-using CityFoundation.Rendering;
-using Library.Generation;
-using Library.Models;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -83,7 +78,7 @@ public partial class MainWindow : Window
                     int seed = Random.Shared.Next(1, int.MaxValue);
 
                     // Вызов генератора в Task.Run
-                    currentWorld = await Task.Run(() => generator.Generate(seed, 3, 3));
+                    currentWorld = await Task.Run(() => generator.Generate(seed, 5, 5));
 
                     SetStatus("Сохранение мира...");
                     Directory.CreateDirectory(worldDirectory);
@@ -160,7 +155,7 @@ public partial class MainWindow : Window
         {
             SetStatus("Генерация рельефа...");
             int seed = Random.Shared.Next(1, int.MaxValue);
-            currentWorld = await Task.Run(() => generator.Generate(seed, 3, 3));
+            currentWorld = await Task.Run(() => generator.Generate(seed, 5, 5));
 
             SetStatus("Сохранение мира...");
             await Task.Run(() => saveService.Save(currentWorld!, automaticSavePath));
@@ -282,10 +277,18 @@ public partial class MainWindow : Window
         _ => tag
     };
 
-        currentWorld = generator.Generate(
-            seed,
-            3,
-            3);
+    private static IEnumerable<string> GetToolsForCategory(string tag) => tag switch
+    {
+        "Roads" => new[] { "Грунтовая", "Асфальт", "Магистраль", "Мост", "Перекрёсток", "Снести" },
+        "Housing" => new[] { "Частный дом", "Малоэтажный", "Среднеэтажный", "Многоэтажный", "Общежитие", "Снести" },
+        "Industry" => new[] { "Шахта Fe", "Шахта Cu", "Нефтевышка", "Газ", "Завод", "Фабрика", "Электростанция", "Склад" },
+        "Utilities" => new[] { "Подстанция", "Водобашня", "Котельная", "Канализация", "Газопровод" },
+        "Services" => new[] { "Пожарная", "Полиция", "Больница", "Поликлиника", "Школа", "Колледж", "Вуз" },
+        "Nature" => new[] { "Парк", "Велодорожка", "Прогулка", "Озеленение", "Пруд" },
+        "Population" => new[] { "Демография", "Занятость", "Миграция" },
+        "Economy" => new[] { "Бюджет", "Налоги", "Торговля", "Логистика" },
+        _ => Array.Empty<string>()
+    };
 
     // обновление ресурсов
     private void UpdateResourcesPanel()
