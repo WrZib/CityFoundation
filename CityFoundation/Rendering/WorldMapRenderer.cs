@@ -6,6 +6,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Threading;
+using System.Threading.Tasks;
 using Library.Models;
 
 namespace CityFoundation.Rendering;
@@ -33,6 +35,8 @@ public class WorldMapRenderer
     private Panel? tileGrid;
 
     private World? currentWorld;
+    private CancellationTokenSource? renderCancellation;
+    private int renderVersion;
 
     private bool isDragging;
     private Point lastMousePosition;
@@ -66,71 +70,94 @@ public class WorldMapRenderer
         };
     }
 
-    public void SetWorld(World world)
+    public async Task SetWorldAsync(World world)
     {
         currentWorld = world;
+
+        renderCancellation?.Cancel();
+        renderCancellation?.Dispose();
+        renderCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = renderCancellation.Token;
+        int version = Interlocked.Increment(ref renderVersion);
 
         scale.ScaleX = InitialZoom;
         scale.ScaleY = InitialZoom;
 
-        Draw();
+        await DrawAsync(world, version, cancellationToken);
 
         viewport.Dispatcher.BeginInvoke(
             new Action(CenterMap),
             System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    private void Draw()
+    public void SetWorld(World world) => _ = SetWorldAsync(world);
+
+    private async Task DrawAsync(World world, int version, CancellationToken cancellationToken)
     {
-        if (currentWorld == null)
-            return;
-
-        content.Children.Clear();
-
-        constructionGrid = null;
-        tileGrid = null;
-
-        int tileCells =
-            WorldTile.ChunkCount * WorldChunk.Size;
-
+        int tileCells = WorldTile.ChunkCount * WorldChunk.Size;
         double tileSize = tileCells * CellPixelSize;
 
-        content.Width = currentWorld.TotalCellWidth * CellPixelSize;
-        content.Height = currentWorld.TotalCellHeight * CellPixelSize;
-
-        // Отрисовка тайлов
-        for (int x = 0; x < currentWorld.Width; x++)
+        await viewport.Dispatcher.InvokeAsync(() =>
         {
-            for (int y = 0; y < currentWorld.Height; y++)
+            if (cancellationToken.IsCancellationRequested || version != renderVersion || !ReferenceEquals(currentWorld, world))
+                return;
+
+            content.Children.Clear();
+
+            constructionGrid = null;
+            tileGrid = null;
+
+            content.Width = world.TotalCellWidth * CellPixelSize;
+            content.Height = world.TotalCellHeight * CellPixelSize;
+
+            CenterMap();
+
+            DrawTileGrid(tileSize);
+            DrawConstructionGrid();
+
+            UpdateLod();
+        }, System.Windows.Threading.DispatcherPriority.Render, cancellationToken);
+
+        var tileTasks = new List<Task>();
+        for (int x = 0; x < world.Width; x++)
+        {
+            for (int y = 0; y < world.Height; y++)
             {
-                WriteableBitmap bitmap =
-                    CreateTileBitmap(currentWorld.Tiles[x, y]);
-
-                Image image = new()
+                int tileX = x;
+                int tileY = y;
+                tileTasks.Add(Task.Run(async () =>
                 {
-                    Source = bitmap,
-                    Width = tileSize,
-                    Height = tileSize,
-                    Stretch = Stretch.Fill,
-                    IsHitTestVisible = false,
-                    SnapsToDevicePixels = true
-                };
+                    cancellationToken.ThrowIfCancellationRequested();
+                    WriteableBitmap bitmap = CreateTileBitmap(world.Tiles[tileX, tileY]);
 
-                RenderOptions.SetBitmapScalingMode(
-                    image,
-                    BitmapScalingMode.Fant);
+                    await viewport.Dispatcher.InvokeAsync(() =>
+                    {
+                        if (cancellationToken.IsCancellationRequested ||
+                            version != renderVersion ||
+                            !ReferenceEquals(currentWorld, world))
+                            return;
 
-                Canvas.SetLeft(image, x * tileSize);
-                Canvas.SetTop(image, y * tileSize);
+                        Image image = new()
+                        {
+                            Source = bitmap,
+                            Width = tileSize,
+                            Height = tileSize,
+                            Stretch = Stretch.Fill,
+                            IsHitTestVisible = false,
+                            SnapsToDevicePixels = true
+                        };
 
-                content.Children.Add(image);
+                        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.Fant);
+                        Canvas.SetLeft(image, tileX * tileSize);
+                        Canvas.SetTop(image, tileY * tileSize);
+                        Panel.SetZIndex(image, 0);
+                        content.Children.Add(image);
+                    }, System.Windows.Threading.DispatcherPriority.Render, cancellationToken);
+                }, cancellationToken));
             }
         }
 
-        DrawTileGrid(tileSize);
-        DrawConstructionGrid();
-
-        UpdateLod();
+        await Task.WhenAll(tileTasks);
     }
 
     // Создание текстуры тайла
