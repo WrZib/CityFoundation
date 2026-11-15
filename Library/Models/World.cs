@@ -11,7 +11,12 @@ public class World
 
     public double TileSizeKm => WorldTile.SizeKm;
 
+    public double CellSizeMeters =>
+        TileSizeKm * 1000.0 / (WorldTile.ChunkCount * WorldChunk.Size);
+
     public WorldTile[,] Tiles { get; set; }
+
+    public List<ResourceDeposit> ResourceDeposits { get; set; } = new();
 
     public int ChunksPerTile => WorldTile.ChunkCount;
 
