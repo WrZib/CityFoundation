@@ -241,8 +241,9 @@ public partial class MainWindow : Window
         if (sender is not Button btn || btn.Tag is not string tag) return;
         if (_activeCategory == tag)
         {
+            renderer?.ClearPaintBrush();
             SubMenuBorder.Visibility = Visibility.Collapsed;
-            _activeCategory = null; _activeTool = null; return;
+            _activeCategory = null; _activeTool = null;return;
         }
         _activeCategory = tag; _activeTool = null;
         SubMenuPanel.Children.Clear();
@@ -262,6 +263,27 @@ public partial class MainWindow : Window
     {
         if (sender is not Button btn) return;
         _activeTool = btn.Tag?.ToString();
+
+        renderer?.ClearPaintBrush();   // сброс прошлого инструмента
+
+        switch (_activeTool)
+        {
+            case "Грунтовая":
+                renderer?.SetPaintBrush(Colors.Gray, 5);
+                break;
+
+            case "Асфальт":
+                renderer?.SetPaintBrush(Color.FromRgb(60, 60, 60), 10);
+                break;
+
+            case "Магистраль":
+                renderer?.SetPaintBrush(Color.FromRgb(30, 30, 30), 15);
+                break;
+
+            case "Снести":
+                renderer?.SetEraseMode(5);
+                break;
+        }
     }
 
     private static string GetCategoryTitle(string tag) => tag switch

@@ -41,6 +41,67 @@ public class WorldMapRenderer
     private bool isDragging;
     private Point lastMousePosition;
 
+    private Rectangle? centerHighlight;
+    // Режим рисования ПКМ
+    private bool isPainting;
+    // Запомненные координаты сессии рисования
+    Point PaintStartCell;
+    Point PaintEndCell;
+    private bool isErasing;   // true = инструмент "Снести" false = рисование
+    private int brushSize = 5;   // размер кисти в клетках мира (5, 10, 15)
+
+    //коллекция чтобы не пытаться закрасить уже закрашенный пиксель повторно
+    private readonly HashSet<(int X, int Y)> paintedCells = new();
+    private readonly Dictionary<(int X, int Y), Rectangle> paintedVisuals = new();
+    private Color paintColor = Colors.Gray;
+    private double paintOpacity = 0.85;
+    private bool isToolActive;
+
+    public bool IsToolActive
+    {
+        get => isToolActive;
+        set
+        {
+            isToolActive = value;
+            if (!value) StopPainting();
+        }
+    }
+    //режим стирания дороги
+    public void SetEraseMode(int size)
+    {
+        brushSize = size;
+        isToolActive = true;
+        isErasing = true;
+        StopPainting();
+    }
+    //выбирается размер кисти и режим рисования
+    public void SetPaintBrush(Color color, int size, double opacity = 0.85)
+    {
+        paintColor = color;
+        paintOpacity = opacity;
+        brushSize = size;
+        isToolActive = true;
+        isErasing = false;
+    }
+
+    //отключает активные элементы
+    public void ClearPaintBrush()
+    {
+        isToolActive = false;
+        isErasing = false;
+        StopPainting();
+    }
+
+   
+    public void ClearPainted()
+    {
+        foreach (var visual in paintedVisuals.Values)
+            content.Children.Remove(visual);
+
+        paintedVisuals.Clear();
+        paintedCells.Clear();
+    }
+
     public WorldMapRenderer(Canvas viewport, Canvas content)
     {
         this.viewport = viewport;
@@ -58,8 +119,13 @@ public class WorldMapRenderer
             content,
             BitmapScalingMode.Fant);
 
+
         viewport.MouseLeftButtonDown += OnMouseDown;
         viewport.MouseLeftButtonUp += OnMouseUp;
+        //для работы ПКМ
+        viewport.MouseRightButtonDown += OnMouseDown;
+        viewport.MouseRightButtonUp += OnMouseUp;
+
         viewport.MouseMove += OnMouseMove;
         viewport.MouseWheel += OnMouseWheel;
 
@@ -103,6 +169,12 @@ public class WorldMapRenderer
                 return;
 
             content.Children.Clear();
+
+            //отключение режима рисования
+            paintedCells.Clear();
+            paintedVisuals.Clear();
+            isPainting = false;
+            centerHighlight = null;
 
             constructionGrid = null;
             tileGrid = null;
@@ -468,18 +540,48 @@ public class WorldMapRenderer
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+
+        if (isToolActive && e.ChangedButton == MouseButton.Right)
+        {
+            isPainting = true;
+
+            PaintStartCell = e.GetPosition(viewport);
+
+            viewport.CaptureMouse();
+            //меняем курсор на плюсик
+            Mouse.OverrideCursor = Cursors.Cross;
+
+            //рисуем или стираем
+            if (isErasing)
+                EraseAt(e.GetPosition(viewport));
+            else
+                PaintAt(e.GetPosition(viewport));
+
+            e.Handled = true;
+            return;
+        }
+
         if (e.ChangedButton != MouseButton.Left)
             return;
 
         isDragging = true;
         lastMousePosition = e.GetPosition(viewport);
-
         viewport.CaptureMouse();
         Mouse.OverrideCursor = Cursors.Hand;
     }
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (isPainting && e.ChangedButton == MouseButton.Right)
+        {
+            PaintEndCell = e.GetPosition(viewport);
+            //отмена режима рисования
+
+            StopPainting();
+            e.Handled = true;
+            return;
+        }
+
         if (e.ChangedButton != MouseButton.Left)
             return;
 
@@ -513,18 +615,126 @@ public class WorldMapRenderer
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+        if (isPainting)
+        {
+            Point pos = e.GetPosition(viewport);
+            PaintEndCell = pos;
+
+            if (isErasing)
+                EraseAt(pos);//режим чтобы очистить дороги
+            else
+                PaintAt(pos);//режим чтобы рисовать дороги
+
+            return;
+        }
+
         if (!isDragging)
             return;
 
         Point position = e.GetPosition(viewport);
         Vector difference = position - lastMousePosition;
-
         translate.X += difference.X;
         translate.Y += difference.Y;
-
         ClampTranslation();
-
         lastMousePosition = position;
+    }
+    private void StopPainting()
+    {
+        if (!isPainting)
+            return;
+
+        isPainting = false;
+        viewport.ReleaseMouseCapture();
+        Mouse.OverrideCursor = isToolActive ? Cursors.Cross : null;
+    }
+
+    //переводит координаты пикселя на экране в индекс клетки мира
+    private (int X, int Y)? ScreenToCell(Point screenPoint)
+    {
+        if (currentWorld == null) return null;
+
+        double contentX = (screenPoint.X - translate.X) / scale.ScaleX;
+        double contentY = (screenPoint.Y - translate.Y) / scale.ScaleY;
+
+        int cellX = (int)(contentX / CellPixelSize);
+        int cellY = (int)(contentY / CellPixelSize);
+
+        if (cellX < 0 || cellY < 0 ||
+            cellX >= currentWorld.TotalCellWidth ||
+            cellY >= currentWorld.TotalCellHeight)
+            return null;
+
+        return (cellX, cellY);
+    }
+    //основная функция которая рисует
+    private void PaintAt(Point screenPoint)
+    {
+        if (ScreenToCell(screenPoint) is not { } rawCell)
+            return;
+
+        var cell = SnapToGrid(rawCell, brushSize);
+        
+        if (!paintedCells.Add(cell))
+            return;
+
+        double sizePx = CellPixelSize * brushSize;
+
+        Rectangle rect = new()
+        {
+            Width = sizePx,
+            Height = sizePx,
+            Fill = new SolidColorBrush(paintColor),
+            IsHitTestVisible = false,
+            SnapsToDevicePixels = true
+        };
+
+        //подстановка под сетку
+        Canvas.SetLeft(rect, (double)(cell.X / 2) + (double)(cell.X % 2) / 2);
+        Canvas.SetTop(rect, (double)(cell.Y / 2) + (double)(cell.Y % 2) / 2);
+        Panel.SetZIndex(rect, 40);
+
+        content.Children.Add(rect);
+        paintedVisuals[cell] = rect;
+
+        //switch(brushSize)
+        //{
+        //    case 10:
+        //        paintedVisuals[(cell.X + 1, cell.Y)] = rect;
+        //        paintedVisuals[(cell.X + 1, cell.Y + 1)] = rect;
+        //        paintedVisuals[(cell.X, cell.Y + 1)] = rect;
+        //        break;
+        //    case 15:
+        //        paintedVisuals[(cell.X + 1, cell.Y)] = rect;
+        //        paintedVisuals[(cell.X + 2, cell.Y)] = rect;
+        //        paintedVisuals[(cell.X + 1, cell.Y + 1)] = rect;
+        //        paintedVisuals[(cell.X + 2, cell.Y + 1)] = rect;
+        //        paintedVisuals[(cell.X + 1, cell.Y + 2)] = rect;
+        //        paintedVisuals[(cell.X + 2, cell.Y + 2)] = rect;
+        //        paintedVisuals[(cell.X, cell.Y + 1)] = rect;
+        //        paintedVisuals[(cell.X, cell.Y + 2)] = rect;
+        //        break;
+        //}
+    }
+    private static (int X, int Y) SnapToGrid((int X, int Y) cell, int size)
+    {
+        return (
+            size * (cell.X / size),
+            size * (cell.Y / size));
+    }
+    //стирание одной клетки
+    private void EraseAt(Point screenPoint)
+    {
+        if (ScreenToCell(screenPoint) is not { } rawCell)
+            return;
+
+        var cell = SnapToGrid(rawCell, brushSize);
+
+        if (!paintedVisuals.TryGetValue(cell, out var rect))
+            return;
+
+        content.Children.Remove(rect);
+        paintedVisuals.Remove(cell);
+        paintedCells.Remove(cell);
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
