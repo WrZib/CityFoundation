@@ -117,7 +117,33 @@ public class WorldGenerator
 
         new ResourceGenerator(seed).Generate(world);
 
+        GenerateHighways(world, seed);
+
         return world;
+    }
+
+    private static void GenerateHighways(World world, int seed)
+    {
+        var random = new Random(seed ^ 0x4D4150);
+        int columns = world.TotalCellWidth / ConstructionGrid.CellSize;
+        int rows = world.TotalCellHeight / ConstructionGrid.CellSize;
+        int horizontalRow = random.Next(rows / 4, rows * 3 / 4);
+        int verticalColumn = random.Next(columns / 4, columns * 3 / 4);
+
+        for (int x = 0; x < columns; x++)
+        {
+            var roadCell = new RoadCell(x, horizontalRow);
+            if (world.GetCell(x * ConstructionGrid.CellSize, horizontalRow * ConstructionGrid.CellSize)?.IsBuildable == true)
+                world.Roads.Add(new Road(roadCell, RoadType.Highway, RoadDirection.TwoWay, RoadAxis.Horizontal));
+        }
+        for (int y = 0; y < rows; y++)
+        {
+            var roadCell = new RoadCell(verticalColumn, y);
+            if (world.GetCell(verticalColumn * ConstructionGrid.CellSize, y * ConstructionGrid.CellSize)?.IsBuildable == true &&
+                !world.Roads.Any(r => r.Cell == roadCell))
+                world.Roads.Add(new Road(roadCell, RoadType.Highway, RoadDirection.TwoWay, RoadAxis.Vertical));
+        }
+        world.RebuildRoadNetwork();
     }
 
     private static ChunkCell GenerateCell(

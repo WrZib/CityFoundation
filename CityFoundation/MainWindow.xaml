@@ -7,6 +7,8 @@
         MinWidth="1024" MinHeight="680"
         Background="#0A0E14"
         WindowStartupLocation="CenterScreen"
+        KeyDown="Window_KeyDown"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Closing="Window_Closing"
         Loaded="OnWindowLoaded">
 

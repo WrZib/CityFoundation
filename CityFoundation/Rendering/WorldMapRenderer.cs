@@ -32,6 +32,7 @@ public class WorldMapRenderer
     private readonly TranslateTransform translate = new();
 
     private Rectangle? constructionGrid;
+    private Canvas? buildingGrid;
     private Panel? tileGrid;
 
     private World? currentWorld;
@@ -43,19 +44,19 @@ public class WorldMapRenderer
     private Point lastMousePosition;
 
     private Rectangle? centerHighlight;
-    // Режим рисования ПКМ
+    // Режим строительства дорог ЛКМ
     private bool isPainting;
     // Запомненные координаты сессии рисования
-    Point PaintStartCell;
-    Point PaintEndCell;
-    private bool isErasing;   // true = инструмент "Снести" false = рисование
-    private int brushSize = 5;   // размер кисти в клетках мира (5, 10, 15)
+    private Point PaintStartCell;
+    private Point PaintEndCell;
+    private bool isErasing;
+    private RoadType selectedRoadType = RoadType.Dirt;
+    private RoadDirection selectedRoadDirection = RoadDirection.TwoWay;
 
     //коллекция чтобы не пытаться закрасить уже закрашенный пиксель повторно
-    private readonly HashSet<(int X, int Y)> paintedCells = new();
-    private readonly Dictionary<(int X, int Y), Rectangle> paintedVisuals = new();
-    private Color paintColor = Colors.Gray;
-    private double paintOpacity = 0.85;
+    private readonly Dictionary<RoadCell, Image> roadVisuals = new();
+    private readonly HashSet<RoadCell> strokeCreatedCells = new();
+    private readonly HashSet<RoadCell> strokeExistingCells = new();
     private bool isToolActive;
 
     public bool IsToolActive
@@ -68,19 +69,24 @@ public class WorldMapRenderer
         }
     }
     //режим стирания дороги
-    public void SetEraseMode(int size)
+    public void SetEraseMode(int size = 1)
     {
-        brushSize = size;
         isToolActive = true;
         isErasing = true;
-        StopPainting();
     }
     //выбирается размер кисти и режим рисования
     public void SetPaintBrush(Color color, int size, double opacity = 0.85)
     {
-        paintColor = color;
-        paintOpacity = opacity;
-        brushSize = size;
+        selectedRoadType = size >= 15 ? RoadType.Highway : size >= 10 ? RoadType.Ordinary : RoadType.Dirt;
+        selectedRoadDirection = RoadDirection.TwoWay;
+        isToolActive = true;
+        isErasing = false;
+    }
+
+    public void SetRoadTool(RoadType type, RoadDirection direction)
+    {
+        selectedRoadType = type;
+        selectedRoadDirection = direction;
         isToolActive = true;
         isErasing = false;
     }
@@ -96,11 +102,9 @@ public class WorldMapRenderer
    
     public void ClearPainted()
     {
-        foreach (var visual in paintedVisuals.Values)
+        foreach (var visual in roadVisuals.Values)
             content.Children.Remove(visual);
-
-        paintedVisuals.Clear();
-        paintedCells.Clear();
+        roadVisuals.Clear();
     }
 
     public WorldMapRenderer(Canvas viewport, Canvas content)
@@ -140,6 +144,7 @@ public class WorldMapRenderer
     public async Task SetWorldAsync(World world)
     {
         currentWorld = world;
+        world.RebuildRoadNetwork();
 
         renderCancellation?.Cancel();
         renderCancellation?.Dispose();
@@ -171,9 +176,7 @@ public class WorldMapRenderer
 
             content.Children.Clear();
 
-            //отключение режима рисования
-            paintedCells.Clear();
-            paintedVisuals.Clear();
+            ClearPainted();
             isPainting = false;
             centerHighlight = null;
 
@@ -186,9 +189,12 @@ public class WorldMapRenderer
             CenterMap();
 
             DrawTileGrid(tileSize);
-            DrawConstructionGrid();
+            // Строительная сетка мира скрыта. Отдельная сетка появится только рядом с дорогами.
+            constructionGrid = null;
+            buildingGrid = null;
 
             UpdateLod();
+            RedrawRoads();
         }, System.Windows.Threading.DispatcherPriority.Render, cancellationToken);
 
         var tileTasks = new List<Task>();
@@ -559,11 +565,9 @@ public class WorldMapRenderer
 
         if (constructionGrid != null)
         {
-            constructionGrid.Visibility =
-                zoom >= ConstructionGridZoom
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+            constructionGrid.Visibility = Visibility.Collapsed;
         }
+        if (buildingGrid != null) buildingGrid.Visibility = zoom >= 1 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void CenterMap()
@@ -582,10 +586,26 @@ public class WorldMapRenderer
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Ctrl временно превращает ЛКМ в панорамирование карты даже в режиме строительства.
+        if (e.ChangedButton == MouseButton.Left && IsCtrlPressed())
+        {
+            isDragging = true;
+            isPainting = false;
+            lastMousePosition = e.GetPosition(viewport);
+            viewport.CaptureMouse();
+            Mouse.OverrideCursor = Cursors.SizeAll;
+            e.Handled = true;
+            return;
+        }
 
-        if (isToolActive && e.ChangedButton == MouseButton.Right)
+        if (isToolActive && e.ChangedButton == MouseButton.Left)
         {
             isPainting = true;
+
+            strokeCreatedCells.Clear();
+            strokeExistingCells.Clear();
+            if (currentWorld != null)
+                foreach (var road in currentWorld.Roads) strokeExistingCells.Add(road.Cell);
 
             PaintStartCell = e.GetPosition(viewport);
 
@@ -593,11 +613,10 @@ public class WorldMapRenderer
             //меняем курсор на плюсик
             Mouse.OverrideCursor = Cursors.Cross;
 
-            //рисуем или стираем
             if (isErasing)
                 EraseAt(e.GetPosition(viewport));
             else
-                PaintAt(e.GetPosition(viewport));
+                PaintAlongSelection(e.GetPosition(viewport));
 
             e.Handled = true;
             return;
@@ -614,7 +633,7 @@ public class WorldMapRenderer
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (isPainting && e.ChangedButton == MouseButton.Right)
+        if (isPainting && e.ChangedButton == MouseButton.Left)
         {
             PaintEndCell = e.GetPosition(viewport);
             //отмена режима рисования
@@ -657,15 +676,26 @@ public class WorldMapRenderer
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+        if (isDragging && IsCtrlPressed())
+        {
+            Point ctrlPosition = e.GetPosition(viewport);
+            Vector ctrlDifference = ctrlPosition - lastMousePosition;
+            translate.X += ctrlDifference.X;
+            translate.Y += ctrlDifference.Y;
+            ClampTranslation();
+            lastMousePosition = ctrlPosition;
+            return;
+        }
+
         if (isPainting)
         {
             Point pos = e.GetPosition(viewport);
             PaintEndCell = pos;
 
             if (isErasing)
-                EraseAt(pos);//режим чтобы очистить дороги
+                EraseAlongSelection(pos);
             else
-                PaintAt(pos);//режим чтобы рисовать дороги
+                PaintAlongSelection(pos);
 
             return;
         }
@@ -680,6 +710,9 @@ public class WorldMapRenderer
         ClampTranslation();
         lastMousePosition = position;
     }
+
+    private static bool IsCtrlPressed() =>
+        Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
     private void StopPainting()
     {
         if (!isPainting)
@@ -688,6 +721,8 @@ public class WorldMapRenderer
         isPainting = false;
         viewport.ReleaseMouseCapture();
         Mouse.OverrideCursor = isToolActive ? Cursors.Cross : null;
+        strokeCreatedCells.Clear();
+        strokeExistingCells.Clear();
     }
 
     //переводит координаты пикселя на экране в индекс клетки мира
@@ -709,74 +744,140 @@ public class WorldMapRenderer
         return (cellX, cellY);
     }
     //основная функция которая рисует
-    private void PaintAt(Point screenPoint)
+    private void PaintAlongSelection(Point screenPoint)
     {
         if (ScreenToCell(screenPoint) is not { } rawCell)
             return;
-
-        var cell = SnapToGrid(rawCell, brushSize);
-        
-        if (!paintedCells.Add(cell))
-            return;
-
-        double sizePx = CellPixelSize * brushSize;
-
-        Rectangle rect = new()
+        var start = ScreenToCell(PaintStartCell) is { } s ? s : rawCell;
+        var a = ToRoadCell(start); var b = ToRoadCell(rawCell);
+        bool horizontal = Math.Abs(b.X - a.X) >= Math.Abs(b.Y - a.Y);
+        int from = horizontal ? Math.Min(a.X, b.X) : Math.Min(a.Y, b.Y);
+        int to = horizontal ? Math.Max(a.X, b.X) : Math.Max(a.Y, b.Y);
+        var targetCells = new HashSet<RoadCell>();
+        for (int i = from; i <= to; i++)
         {
-            Width = sizePx,
-            Height = sizePx,
-            Fill = new SolidColorBrush(paintColor),
-            IsHitTestVisible = false,
-            SnapsToDevicePixels = true
-        };
+            var cell = horizontal ? new RoadCell(i, a.Y) : new RoadCell(a.X, i);
+            if (selectedRoadType == RoadType.Highway) continue;
+            if (!IsRoadBuildable(cell)) continue;
+            if (!CanPlaceRoadCell(cell, horizontal, targetCells)) continue;
+            targetCells.Add(cell);
+        }
 
-        //подстановка под сетку
-        Canvas.SetLeft(rect, (double)(cell.X / 2) + (double)(cell.X % 2) / 2);
-        Canvas.SetTop(rect, (double)(cell.Y / 2) + (double)(cell.Y % 2) / 2);
-        Panel.SetZIndex(rect, 40);
+        if (currentWorld == null) return;
+        foreach (var oldCell in strokeCreatedCells.Except(targetCells).ToList())
+            currentWorld.Roads.RemoveAll(r => r.Cell == oldCell);
+        strokeCreatedCells.RemoveWhere(oldCell => !targetCells.Contains(oldCell));
 
-        content.Children.Add(rect);
-        paintedVisuals[cell] = rect;
-
-        //switch(brushSize)
-        //{
-        //    case 10:
-        //        paintedVisuals[(cell.X + 1, cell.Y)] = rect;
-        //        paintedVisuals[(cell.X + 1, cell.Y + 1)] = rect;
-        //        paintedVisuals[(cell.X, cell.Y + 1)] = rect;
-        //        break;
-        //    case 15:
-        //        paintedVisuals[(cell.X + 1, cell.Y)] = rect;
-        //        paintedVisuals[(cell.X + 2, cell.Y)] = rect;
-        //        paintedVisuals[(cell.X + 1, cell.Y + 1)] = rect;
-        //        paintedVisuals[(cell.X + 2, cell.Y + 1)] = rect;
-        //        paintedVisuals[(cell.X + 1, cell.Y + 2)] = rect;
-        //        paintedVisuals[(cell.X + 2, cell.Y + 2)] = rect;
-        //        paintedVisuals[(cell.X, cell.Y + 1)] = rect;
-        //        paintedVisuals[(cell.X, cell.Y + 2)] = rect;
-        //        break;
-        //}
+        foreach (var cell in targetCells)
+        {
+            RoadCell? sourceCell = null;
+            if (selectedRoadDirection == RoadDirection.OneWay)
+            {
+                int step = horizontal ? Math.Sign(b.X - a.X) : Math.Sign(b.Y - a.Y);
+                if (step == 0) step = 1;
+                sourceCell = horizontal ? new RoadCell(cell.X - step, cell.Y) : new RoadCell(cell.X, cell.Y - step);
+            }
+            UpsertRoad(cell, sourceCell, horizontal ? RoadAxis.Horizontal : RoadAxis.Vertical);
+            if (!strokeExistingCells.Contains(cell)) strokeCreatedCells.Add(cell);
+        }
+        RedrawRoads();
     }
-    private static (int X, int Y) SnapToGrid((int X, int Y) cell, int size)
+
+    private bool IsRoadBuildable(RoadCell roadCell)
     {
-        return (
-            size * (cell.X / size),
-            size * (cell.Y / size));
+        if (currentWorld == null) return false;
+        int startX = roadCell.X * ConstructionGrid.CellSize;
+        int startY = roadCell.Y * ConstructionGrid.CellSize;
+        for (int x = 0; x < ConstructionGrid.CellSize; x++)
+            for (int y = 0; y < ConstructionGrid.CellSize; y++)
+                if (currentWorld.GetCell(startX + x, startY + y)?.IsBuildable == true)
+                    return true;
+        return false;
     }
-    //стирание одной клетки
+
+    private RoadCell ToRoadCell((int X, int Y) cell) => new(cell.X / ConstructionGrid.CellSize, cell.Y / ConstructionGrid.CellSize);
+
+    private bool CanPlaceRoadCell(RoadCell cell, bool horizontal, HashSet<RoadCell> strokeCells)
+    {
+        if (currentWorld == null) return false;
+        var existing = currentWorld.Roads.FirstOrDefault(r => r.Cell == cell);
+        if (existing != null) return true; // Совпадение двух направлений становится перекрестком.
+
+        // Между параллельными улицами оставляем минимум две строительные ячейки.
+        foreach (var road in currentWorld.Roads)
+        {
+            if (strokeCells.Contains(road.Cell)) continue;
+            if (horizontal && road.Axis is RoadAxis.Horizontal or RoadAxis.Cross &&
+                road.Cell.Y != cell.Y && Math.Abs(road.Cell.Y - cell.Y) <= 2 &&
+                Math.Abs(road.Cell.X - cell.X) <= 1) return false;
+            if (!horizontal && road.Axis is RoadAxis.Vertical or RoadAxis.Cross &&
+                road.Cell.X != cell.X && Math.Abs(road.Cell.X - cell.X) <= 2 &&
+                Math.Abs(road.Cell.Y - cell.Y) <= 1) return false;
+        }
+        return true;
+    }
+
+    private void UpsertRoad(RoadCell cell, RoadCell? from, RoadAxis axis)
+    {
+        var road = currentWorld!.Roads.FirstOrDefault(r => r.Cell == cell);
+        if (road == null)
+        {
+            road = new Road(cell, selectedRoadType, selectedRoadDirection, axis) { OneWayFrom = from };
+            currentWorld.Roads.Add(road);
+        }
+        else
+        {
+            road.Type = selectedRoadType;
+            road.Direction = selectedRoadDirection;
+            road.OneWayFrom = from;
+            road.Axis = road.Axis == axis ? axis : RoadAxis.Cross;
+        }
+        currentWorld.RebuildRoadNetwork();
+    }
+
+    private void EraseAlongSelection(Point screenPoint)
+    {
+        if (ScreenToCell(screenPoint) is not { } rawCell || currentWorld == null) return;
+        var cell = ToRoadCell(rawCell);
+        var start = ScreenToCell(PaintStartCell) is { } startRaw ? ToRoadCell(startRaw) : cell;
+        var road = currentWorld.Roads.FirstOrDefault(r => r.Cell == cell);
+        if (road == null) return;
+
+        var cells = new HashSet<RoadCell>();
+        bool horizontal = Math.Abs(cell.X - start.X) >= Math.Abs(cell.Y - start.Y);
+        if (cell != start)
+        {
+            int from = horizontal ? Math.Min(start.X, cell.X) : Math.Min(start.Y, cell.Y);
+            int to = horizontal ? Math.Max(start.X, cell.X) : Math.Max(start.Y, cell.Y);
+            for (int i = from; i <= to; i++)
+                cells.Add(horizontal ? new RoadCell(i, start.Y) : new RoadCell(start.X, i));
+        }
+        else
+        {
+            // Одиночный клик удаляет сегмент до перекрестка или конца улицы.
+            cells.Add(cell);
+            var axis = road.Axis == RoadAxis.Cross ? RoadAxis.Horizontal : road.Axis;
+            foreach (int sign in new[] { -1, 1 })
+            {
+                for (int distance = 1; distance < 10000; distance++)
+                {
+                    var next = axis == RoadAxis.Horizontal
+                        ? new RoadCell(cell.X + distance * sign, cell.Y)
+                        : new RoadCell(cell.X, cell.Y + distance * sign);
+                    var nextRoad = currentWorld.Roads.FirstOrDefault(r => r.Cell == next);
+                    if (nextRoad == null || nextRoad.Axis == RoadAxis.Cross) break;
+                    cells.Add(next);
+                }
+            }
+        }
+        currentWorld.Roads.RemoveAll(r => cells.Contains(r.Cell));
+        currentWorld.RebuildRoadNetwork();
+        RedrawRoads();
+    }
+
     private void EraseAt(Point screenPoint)
     {
-        if (ScreenToCell(screenPoint) is not { } rawCell)
-            return;
-
-        var cell = SnapToGrid(rawCell, brushSize);
-
-        if (!paintedVisuals.TryGetValue(cell, out var rect))
-            return;
-
-        content.Children.Remove(rect);
-        paintedVisuals.Remove(cell);
-        paintedCells.Remove(cell);
+        EraseAlongSelection(screenPoint);
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
@@ -803,5 +904,110 @@ public class WorldMapRenderer
 
         ClampTranslation();
         UpdateLod();
+    }
+
+    private void RedrawRoads()
+    {
+        if (currentWorld == null) return;
+        foreach (var visual in roadVisuals.Values) content.Children.Remove(visual);
+        roadVisuals.Clear();
+        if (buildingGrid != null) content.Children.Remove(buildingGrid);
+
+        buildingGrid = new Canvas { Width = content.Width, Height = content.Height, IsHitTestVisible = false };
+        var roads = currentWorld.Roads.ToDictionary(r => r.Cell);
+        var cells = roads.Keys.ToHashSet();
+        var buildingCells = new HashSet<RoadCell>();
+        foreach (var road in currentWorld.Roads)
+        {
+            var image = new Image
+            {
+                Width = ConstructionGrid.CellSize * CellPixelSize,
+                Height = ConstructionGrid.CellSize * CellPixelSize,
+                Source = CreateRoadBitmap(road, roads),
+                Stretch = Stretch.Fill,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(image, road.Cell.X * ConstructionGrid.CellSize * CellPixelSize);
+            Canvas.SetTop(image, road.Cell.Y * ConstructionGrid.CellSize * CellPixelSize);
+            Panel.SetZIndex(image, 35);
+            content.Children.Add(image);
+            roadVisuals[road.Cell] = image;
+            DrawBuildingCells(road.Cell, cells, buildingCells);
+        }
+        Panel.SetZIndex(buildingGrid, 30);
+        content.Children.Add(buildingGrid);
+        UpdateLod();
+    }
+
+    private void DrawBuildingCells(RoadCell road, HashSet<RoadCell> roads, HashSet<RoadCell> buildingCells)
+    {
+        foreach (var cell in new[]
+        {
+            new RoadCell(road.X - 1, road.Y), new RoadCell(road.X + 1, road.Y),
+            new RoadCell(road.X, road.Y - 1), new RoadCell(road.X, road.Y + 1)
+        })
+        {
+            if (roads.Contains(cell) || !buildingCells.Add(cell)) continue;
+            var rect = new Rectangle
+            {
+                Width = ConstructionGrid.CellSize * CellPixelSize,
+                Height = ConstructionGrid.CellSize * CellPixelSize,
+                Stroke = new SolidColorBrush(Color.FromArgb(130, 235, 213, 120)),
+                StrokeThickness = 0.18,
+                Fill = Brushes.Transparent
+            };
+            Canvas.SetLeft(rect, cell.X * ConstructionGrid.CellSize * CellPixelSize);
+            Canvas.SetTop(rect, cell.Y * ConstructionGrid.CellSize * CellPixelSize);
+            buildingGrid.Children.Add(rect);
+        }
+    }
+
+    private BitmapSource CreateRoadBitmap(Road road, IReadOnlyDictionary<RoadCell, Road> roads)
+    {
+        const int size = 40;
+        var pixels = new byte[size * size * 4];
+        Color baseColor = road.Type switch
+        {
+            RoadType.Dirt => Color.FromRgb(142, 103, 65),
+            RoadType.Highway => Color.FromRgb(38, 43, 50),
+            _ => Color.FromRgb(65, 68, 73)
+        };
+        Color edgeColor = road.Type switch
+        {
+            RoadType.Dirt => Color.FromRgb(184, 144, 91),
+            RoadType.Highway => Color.FromRgb(232, 190, 70),
+            _ => Color.FromRgb(178, 182, 185)
+        };
+        var left = roads.ContainsKey(new RoadCell(road.Cell.X - 1, road.Cell.Y));
+        var right = roads.ContainsKey(new RoadCell(road.Cell.X + 1, road.Cell.Y));
+        var up = roads.ContainsKey(new RoadCell(road.Cell.X, road.Cell.Y - 1));
+        var down = roads.ContainsKey(new RoadCell(road.Cell.X, road.Cell.Y + 1));
+        bool hasHorizontal = road.Axis is RoadAxis.Horizontal or RoadAxis.Cross || left || right;
+        bool hasVertical = road.Axis is RoadAxis.Vertical or RoadAxis.Cross || up || down;
+        bool mixedNeighbour = roads.Values.Any(other =>
+            Math.Abs(other.Cell.X - road.Cell.X) + Math.Abs(other.Cell.Y - road.Cell.Y) == 1 &&
+            other.Type != road.Type);
+        for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+        {
+            bool center = x is >= 13 and <= 26 && y is >= 13 and <= 26;
+            bool horizontal = center || (y is >= 13 and <= 26 && ((left && x < 20) || (right && x >= 20)));
+            bool vertical = center || (x is >= 13 and <= 26 && ((up && y < 20) || (down && y >= 20)));
+            bool sidewalk = (hasHorizontal && y is 10 or 11 or 28 or 29) &&
+                            ((left && x < 20) || (right && x >= 20) || road.Axis == RoadAxis.Horizontal) ||
+                            (hasVertical && x is 10 or 11 or 28 or 29) &&
+                            ((up && y < 20) || (down && y >= 20) || road.Axis == RoadAxis.Vertical);
+            Color c = horizontal || vertical ? baseColor : sidewalk ? Color.FromRgb(205, 178, 118) : Colors.Transparent;
+            if ((x + y) % 11 == 0 && c.A != 0) c = edgeColor;
+            if (mixedNeighbour && c.A != 0 && (x == 19 || y == 19)) c = Color.FromRgb(216, 146, 53);
+            if (c.A != 0 && road.Direction == RoadDirection.OneWay &&
+                ((hasHorizontal && y == 19) || (hasVertical && x == 19)))
+                c = Color.FromRgb(235, 205, 84); // маркер одностороннего движения
+            if (c.A != 0 && road.Direction == RoadDirection.TwoWay &&
+                ((hasHorizontal && y == 19 && x % 9 < 4) || (hasVertical && x == 19 && y % 9 < 4)))
+                c = Color.FromRgb(220, 220, 200); // разделительная разметка двухсторонней дороги
+            int i = (y * size + x) * 4; pixels[i] = c.B; pixels[i + 1] = c.G; pixels[i + 2] = c.R; pixels[i + 3] = c.A;
+        }
+        var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Bgra32, null, pixels, size * 4);
+        bitmap.Freeze(); return bitmap;
     }
 }

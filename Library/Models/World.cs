@@ -18,6 +18,10 @@ public class World
 
     public List<ResourceDeposit> ResourceDeposits { get; set; } = new();
 
+    public List<Road> Roads { get; set; } = new();
+
+    public RoadNetwork RoadNetwork { get; } = new();
+
     public int ChunksPerTile => WorldTile.ChunkCount;
 
     public int CellsPerChunk => WorldChunk.Size;
@@ -63,4 +67,6 @@ public class World
 
         return chunk.Cells[cellX, cellY];
     }
+
+    public void RebuildRoadNetwork() => RoadNetwork.Rebuild(Roads);
 }

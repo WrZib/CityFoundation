@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Library.Generation;
 using Library.Models;
@@ -49,7 +50,29 @@ public partial class MainWindow : Window
         currentWorld = world;
     }
 
-    // Загрузка и генерация
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            ExitBuildMode();
+            e.Handled = true;
+        }
+    }
+
+    private void Window_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) ExitBuildMode();
+    }
+
+    private void ExitBuildMode()
+    {
+        renderer?.ClearPaintBrush();
+        _activeTool = null;
+        SubMenuBorder.Visibility = Visibility.Collapsed;
+        Keyboard.ClearFocus();
+    }
+
+    // Р—Р°РіСЂСѓР·РєР° Рё РіРµРЅРµСЂР°С†РёСЏ
     private void OnWindowLoaded(object sender, RoutedEventArgs e) => LoadOrCreateWorldAsync();
 
     private async void LoadOrCreateWorldAsync()
@@ -57,54 +80,54 @@ public partial class MainWindow : Window
         if (isInitializing) return;
         isInitializing = true;
 
-        ShowLoading(true, "Инициализация...");
+        ShowLoading(true, "РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ...");
 
-        // Даем интерфейсу отрисовать оверлей и запустить анимацию
+        // Р”Р°РµРј РёРЅС‚РµСЂС„РµР№СЃСѓ РѕС‚СЂРёСЃРѕРІР°С‚СЊ РѕРІРµСЂР»РµР№ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ Р°РЅРёРјР°С†РёСЋ
         await Task.Delay(100);
 
         try
         {
-            // ГЕНЕРАЦИЯ (в фоновом потоке) - интерфейс плавно анимируется
+            // Р“Р•РќР•Р РђР¦РРЇ (РІ С„РѕРЅРѕРІРѕРј РїРѕС‚РѕРєРµ) - РёРЅС‚РµСЂС„РµР№СЃ РїР»Р°РІРЅРѕ Р°РЅРёРјРёСЂСѓРµС‚СЃСЏ
             if (currentWorld == null)
             {
                 if (File.Exists(automaticSavePath))
                 {
-                    SetStatus("Загрузка сохранённого мира...");
+                    SetStatus("Р—Р°РіСЂСѓР·РєР° СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ РјРёСЂР°...");
                     currentWorld = await Task.Run(() => saveService.Load(automaticSavePath));
                 }
                 else
                 {
-                    SetStatus("Генерация рельефа...");
+                    SetStatus("Р“РµРЅРµСЂР°С†РёСЏ СЂРµР»СЊРµС„Р°...");
                     int seed = Random.Shared.Next(1, int.MaxValue);
 
-                    // Вызов генератора в Task.Run
+                    // Р’С‹Р·РѕРІ РіРµРЅРµСЂР°С‚РѕСЂР° РІ Task.Run
                     currentWorld = await Task.Run(() => generator.Generate(seed, 5, 5));
 
-                    SetStatus("Сохранение мира...");
+                    SetStatus("РЎРѕС…СЂР°РЅРµРЅРёРµ РјРёСЂР°...");
                     Directory.CreateDirectory(worldDirectory);
                     await Task.Run(() => saveService.Save(currentWorld!, automaticSavePath));
                 }
             }
 
-            // ОТРИСОВКА КАРТЫ (в главном потоке)
-            SetStatus("Отрисовка карты...");
+            // РћРўР РРЎРћР’РљРђ РљРђР РўР« (РІ РіР»Р°РІРЅРѕРј РїРѕС‚РѕРєРµ)
+            SetStatus("РћС‚СЂРёСЃРѕРІРєР° РєР°СЂС‚С‹...");
 
-            // Даем анимации сделать несколько кадров перед тяжелой отрисовкой
+            // Р”Р°РµРј Р°РЅРёРјР°С†РёРё СЃРґРµР»Р°С‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РєР°РґСЂРѕРІ РїРµСЂРµРґ С‚СЏР¶РµР»РѕР№ РѕС‚СЂРёСЃРѕРІРєРѕР№
             await Task.Delay(150);
 
             renderer = new WorldMapRenderer(MapViewport, MapContent);
 
-            // Этот метод блокирует UI-поток (так устроен WorldMapRenderer),
-            // но анимация уже запущена и будет отрисована.
+            // Р­С‚РѕС‚ РјРµС‚РѕРґ Р±Р»РѕРєРёСЂСѓРµС‚ UI-РїРѕС‚РѕРє (С‚Р°Рє СѓСЃС‚СЂРѕРµРЅ WorldMapRenderer),
+            // РЅРѕ Р°РЅРёРјР°С†РёСЏ СѓР¶Рµ Р·Р°РїСѓС‰РµРЅР° Рё Р±СѓРґРµС‚ РѕС‚СЂРёСЃРѕРІР°РЅР°.
             renderer.SetWorld(currentWorld!);
 
-            SetStatus("Мир готов");
-            await Task.Delay(300); // Даем пользователю увидеть надпись
+            SetStatus("РњРёСЂ РіРѕС‚РѕРІ");
+            await Task.Delay(300); // Р”Р°РµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ СѓРІРёРґРµС‚СЊ РЅР°РґРїРёСЃСЊ
         }
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"Не удалось загрузить мир:\n{ex.Message}",
+                $"РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РјРёСЂ:\n{ex.Message}",
                 "CitySim", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -114,7 +137,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // Потокобезопасно обновляет текст статуса (перенаправляет вызов в главный UI-поток)
+    // РџРѕС‚РѕРєРѕР±РµР·РѕРїР°СЃРЅРѕ РѕР±РЅРѕРІР»СЏРµС‚ С‚РµРєСЃС‚ СЃС‚Р°С‚СѓСЃР° (РїРµСЂРµРЅР°РїСЂР°РІР»СЏРµС‚ РІС‹Р·РѕРІ РІ РіР»Р°РІРЅС‹Р№ UI-РїРѕС‚РѕРє)
     private void SetStatus(string message)
     {
         if (!Dispatcher.CheckAccess())
@@ -125,7 +148,7 @@ public partial class MainWindow : Window
         LoadingText.Text = message;
     }
 
-    // Включает/выключает оверлей загрузки
+    // Р’РєР»СЋС‡Р°РµС‚/РІС‹РєР»СЋС‡Р°РµС‚ РѕРІРµСЂР»РµР№ Р·Р°РіСЂСѓР·РєРё
     private void ShowLoading(bool show, string initialText = "")
     {
         if (show)
@@ -140,37 +163,37 @@ public partial class MainWindow : Window
         }
     }
 
-    // ================= ОСТАЛЬНОЙ ИНТЕРФЕЙС =================
+    // ================= РћРЎРўРђР›Р¬РќРћР™ РРќРўР•Р Р¤Р•Р™РЎ =================
 
-    // Создание нового мира
+    // РЎРѕР·РґР°РЅРёРµ РЅРѕРІРѕРіРѕ РјРёСЂР°
     private async void NewWorldMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        var result = MessageBox.Show("Текущий мир будет потерян. Продолжить?", "Новый мир", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        var result = MessageBox.Show("РўРµРєСѓС‰РёР№ РјРёСЂ Р±СѓРґРµС‚ РїРѕС‚РµСЂСЏРЅ. РџСЂРѕРґРѕР»Р¶РёС‚СЊ?", "РќРѕРІС‹Р№ РјРёСЂ", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes) return;
 
-        ShowLoading(true, "Генерация нового мира...");
+        ShowLoading(true, "Р“РµРЅРµСЂР°С†РёСЏ РЅРѕРІРѕРіРѕ РјРёСЂР°...");
         await Task.Delay(100);
 
         try
         {
-            SetStatus("Генерация рельефа...");
+            SetStatus("Р“РµРЅРµСЂР°С†РёСЏ СЂРµР»СЊРµС„Р°...");
             int seed = Random.Shared.Next(1, int.MaxValue);
             currentWorld = await Task.Run(() => generator.Generate(seed, 5, 5));
 
-            SetStatus("Сохранение мира...");
+            SetStatus("РЎРѕС…СЂР°РЅРµРЅРёРµ РјРёСЂР°...");
             await Task.Run(() => saveService.Save(currentWorld!, automaticSavePath));
 
-            SetStatus("Отрисовка карты...");
+            SetStatus("РћС‚СЂРёСЃРѕРІРєР° РєР°СЂС‚С‹...");
             await Task.Delay(150);
 
             renderer?.SetWorld(currentWorld!);
 
-            SetStatus("Мир готов");
+            SetStatus("РњРёСЂ РіРѕС‚РѕРІ");
             await Task.Delay(300);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"РћС€РёР±РєР°: {ex.Message}", "РћС€РёР±РєР°", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -184,33 +207,33 @@ public partial class MainWindow : Window
 
     private void AboutMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show("CitySim — учебный проект.\nМоделирование городской инфраструктуры.\n\n© 2025", "О программе", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show("CitySim вЂ” СѓС‡РµР±РЅС‹Р№ РїСЂРѕРµРєС‚.\nРњРѕРґРµР»РёСЂРѕРІР°РЅРёРµ РіРѕСЂРѕРґСЃРєРѕР№ РёРЅС„СЂР°СЃС‚СЂСѓРєС‚СѓСЂС‹.\n\nВ© 2025", "Рћ РїСЂРѕРіСЂР°РјРјРµ", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    // Закрытие окна
+    // Р—Р°РєСЂС‹С‚РёРµ РѕРєРЅР°
     private void Window_Closing(object sender, CancelEventArgs e)
     {
         if (_exitConfirmed) return;
-        var result = MessageBox.Show("Сохранить мир перед выходом?", "Выход", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        var result = MessageBox.Show("РЎРѕС…СЂР°РЅРёС‚СЊ РјРёСЂ РїРµСЂРµРґ РІС‹С…РѕРґРѕРј?", "Р’С‹С…РѕРґ", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (result == MessageBoxResult.Cancel) { e.Cancel = true; return; }
         if (result == MessageBoxResult.Yes && !SaveWorldWithDialog()) { e.Cancel = true; return; }
         _exitConfirmed = true;
     }
 
-    // Сохранение мира
+    // РЎРѕС…СЂР°РЅРµРЅРёРµ РјРёСЂР°
     private bool SaveWorldWithDialog() => true;
 
-    // Управление временем 
+    // РЈРїСЂР°РІР»РµРЅРёРµ РІСЂРµРјРµРЅРµРј
     private void PauseButton_Click(object sender, RoutedEventArgs e)
     {
         _isPaused = !_isPaused;
-        PauseButton.Content = _isPaused ? "Пуск" : "Пауза";
+        PauseButton.Content = _isPaused ? "РџСѓСЃРє" : "РџР°СѓР·Р°";
         PauseButton.Background = new SolidColorBrush(_isPaused ? ColorWarning : ColorElevated);
         PauseButton.Foreground = new SolidColorBrush(_isPaused ? ColorDark : ColorText);
     }
 
 
-    // Скорость
+    // РЎРєРѕСЂРѕСЃС‚СЊ
     private void Speed1Button_Click(object sender, RoutedEventArgs e) => SetSpeed(1);
     private void Speed2Button_Click(object sender, RoutedEventArgs e) => SetSpeed(2);
     private void Speed3Button_Click(object sender, RoutedEventArgs e) => SetSpeed(4);
@@ -219,7 +242,7 @@ public partial class MainWindow : Window
     {
         _speed = speed;
         _isPaused = false;
-        PauseButton.Content = "Пауза";
+        PauseButton.Content = "РџР°СѓР·Р°";
         PauseButton.Background = new SolidColorBrush(ColorElevated);
         PauseButton.Foreground = new SolidColorBrush(ColorText);
         ApplySpeedStyle(Speed1Button, speed == 1);
@@ -227,7 +250,7 @@ public partial class MainWindow : Window
         ApplySpeedStyle(Speed3Button, speed == 4);
     }
 
-    // Изменение кнопки скорости
+    // РР·РјРµРЅРµРЅРёРµ РєРЅРѕРїРєРё СЃРєРѕСЂРѕСЃС‚Рё
     private static void ApplySpeedStyle(Button btn, bool active)
     {
         btn.Background = new SolidColorBrush(active ? ColorAccent : ColorElevated);
@@ -235,7 +258,7 @@ public partial class MainWindow : Window
         btn.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
     }
 
-    // Кнопки инструментов в категориях
+    // РљРЅРѕРїРєРё РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ РІ РєР°С‚РµРіРѕСЂРёСЏС…
     private void CategoryButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not string tag) return;
@@ -248,9 +271,9 @@ public partial class MainWindow : Window
         _activeCategory = tag; _activeTool = null;
         SubMenuPanel.Children.Clear();
         SubMenuTitle.Text = GetCategoryTitle(tag);
-        foreach (var tool in GetToolsForCategory(tag))
+        foreach (var tool in tag == "Roads" ? GetRoadTools() : GetToolsForCategory(tag))
         {
-            var b = new Button { Content = tool, Tag = tool };
+            var b = new Button { Content = GetToolLabel(tool), Tag = tool };
             b.SetResourceReference(StyleProperty, "SubmenuButtonStyle");
             b.Click += ToolButton_Click;
             SubMenuPanel.Children.Add(b);
@@ -258,29 +281,65 @@ public partial class MainWindow : Window
         SubMenuBorder.Visibility = Visibility.Visible;
     }
 
-    // Сохраняет выбранный инструмент (из подменю) в переменную _activeTool
+    private static IEnumerable<string> GetRoadTools() => new[]
+    {
+        "ROAD_Dirt_TwoWay", "ROAD_Dirt_OneWay",
+        "ROAD_Ordinary_TwoWay", "ROAD_Ordinary_OneWay",
+        "ROAD_Erase", "ROAD_Cancel"
+    };
+
+    private static string GetToolLabel(string tool) => tool switch
+    {
+        "ROAD_Dirt_TwoWay" => "Р“СЂСѓРЅС‚РѕРІР°СЏ В· РґРІСѓС…СЃС‚РѕСЂРѕРЅРЅСЏСЏ",
+        "ROAD_Dirt_OneWay" => "Р“СЂСѓРЅС‚РѕРІР°СЏ В· РѕРґРЅРѕСЃС‚РѕСЂРѕРЅРЅСЏСЏ",
+        "ROAD_Ordinary_TwoWay" => "РћР±С‹С‡РЅР°СЏ В· РґРІСѓС…СЃС‚РѕСЂРѕРЅРЅСЏСЏ",
+        "ROAD_Ordinary_OneWay" => "РћР±С‹С‡РЅР°СЏ В· РѕРґРЅРѕСЃС‚РѕСЂРѕРЅРЅСЏСЏ",
+        "ROAD_Erase" => "РЎС‚РµСЂРµС‚СЊ РґРѕСЂРѕРіСѓ",
+        "ROAD_Cancel" => "РћС‚РјРµРЅР° (Esc)",
+        _ => tool
+    };
+
+    // РЎРѕС…СЂР°РЅСЏРµС‚ РІС‹Р±СЂР°РЅРЅС‹Р№ РёРЅСЃС‚СЂСѓРјРµРЅС‚ (РёР· РїРѕРґРјРµРЅСЋ) РІ РїРµСЂРµРјРµРЅРЅСѓСЋ _activeTool
     private void ToolButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
         _activeTool = btn.Tag?.ToString();
 
-        renderer?.ClearPaintBrush();   // сброс прошлого инструмента
+        renderer?.ClearPaintBrush();   // СЃР±СЂРѕСЃ РїСЂРѕС€Р»РѕРіРѕ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°
+
+        if (_activeTool?.StartsWith("ROAD_", StringComparison.Ordinal) == true)
+        {
+            if (_activeTool == "ROAD_Cancel")
+            {
+                ExitBuildMode();
+                return;
+            }
+            switch (_activeTool)
+            {
+                case "ROAD_Dirt_TwoWay": renderer?.SetRoadTool(RoadType.Dirt, RoadDirection.TwoWay); break;
+                case "ROAD_Dirt_OneWay": renderer?.SetRoadTool(RoadType.Dirt, RoadDirection.OneWay); break;
+                case "ROAD_Ordinary_TwoWay": renderer?.SetRoadTool(RoadType.Ordinary, RoadDirection.TwoWay); break;
+                case "ROAD_Ordinary_OneWay": renderer?.SetRoadTool(RoadType.Ordinary, RoadDirection.OneWay); break;
+                case "ROAD_Erase": renderer?.SetEraseMode(); break;
+            }
+            return;
+        }
 
         switch (_activeTool)
         {
-            case "Грунтовая":
+            case "Р“СЂСѓРЅС‚РѕРІР°СЏ":
                 renderer?.SetPaintBrush(Colors.Gray, 5);
                 break;
 
-            case "Асфальт":
+            case "РђСЃС„Р°Р»СЊС‚":
                 renderer?.SetPaintBrush(Color.FromRgb(60, 60, 60), 10);
                 break;
 
-            case "Магистраль":
+            case "РњР°РіРёСЃС‚СЂР°Р»СЊ":
                 renderer?.SetPaintBrush(Color.FromRgb(30, 30, 30), 15);
                 break;
 
-            case "Снести":
+            case "РЎРЅРµСЃС‚Рё":
                 renderer?.SetEraseMode(5);
                 break;
         }
@@ -288,38 +347,38 @@ public partial class MainWindow : Window
 
     private static string GetCategoryTitle(string tag) => tag switch
     {
-        "Roads" => "Дороги",
-        "Housing" => "Жильё",
-        "Industry" => "Промышленность",
-        "Utilities" => "ЖКХ",
-        "Services" => "Службы",
-        "Nature" => "Природа",
-        "Population" => "Население",
-        "Economy" => "Экономика",
+        "Roads" => "Р”РѕСЂРѕРіРё",
+        "Housing" => "Р–РёР»СЊС‘",
+        "Industry" => "РџСЂРѕРјС‹С€Р»РµРЅРЅРѕСЃС‚СЊ",
+        "Utilities" => "Р–РљРҐ",
+        "Services" => "РЎР»СѓР¶Р±С‹",
+        "Nature" => "РџСЂРёСЂРѕРґР°",
+        "Population" => "РќР°СЃРµР»РµРЅРёРµ",
+        "Economy" => "Р­РєРѕРЅРѕРјРёРєР°",
         _ => tag
     };
 
     private static IEnumerable<string> GetToolsForCategory(string tag) => tag switch
     {
-        "Roads" => new[] { "Грунтовая", "Асфальт", "Магистраль", "Мост", "Перекрёсток", "Снести" },
-        "Housing" => new[] { "Частный дом", "Малоэтажный", "Среднеэтажный", "Многоэтажный", "Общежитие", "Снести" },
-        "Industry" => new[] { "Шахта Fe", "Шахта Cu", "Нефтевышка", "Газ", "Завод", "Фабрика", "Электростанция", "Склад" },
-        "Utilities" => new[] { "Подстанция", "Водобашня", "Котельная", "Канализация", "Газопровод" },
-        "Services" => new[] { "Пожарная", "Полиция", "Больница", "Поликлиника", "Школа", "Колледж", "Вуз" },
-        "Nature" => new[] { "Парк", "Велодорожка", "Прогулка", "Озеленение", "Пруд" },
-        "Population" => new[] { "Демография", "Занятость", "Миграция" },
-        "Economy" => new[] { "Бюджет", "Налоги", "Торговля", "Логистика" },
+        "Roads" => new[] { "Р“СЂСѓРЅС‚РѕРІР°СЏ", "РђСЃС„Р°Р»СЊС‚", "РњР°РіРёСЃС‚СЂР°Р»СЊ", "РњРѕСЃС‚", "РџРµСЂРµРєСЂС‘СЃС‚РѕРє", "РЎРЅРµСЃС‚Рё" },
+        "Housing" => new[] { "Р§Р°СЃС‚РЅС‹Р№ РґРѕРј", "РњР°Р»РѕСЌС‚Р°Р¶РЅС‹Р№", "РЎСЂРµРґРЅРµСЌС‚Р°Р¶РЅС‹Р№", "РњРЅРѕРіРѕСЌС‚Р°Р¶РЅС‹Р№", "РћР±С‰РµР¶РёС‚РёРµ", "РЎРЅРµСЃС‚Рё" },
+        "Industry" => new[] { "РЁР°С…С‚Р° Fe", "РЁР°С…С‚Р° Cu", "РќРµС„С‚РµРІС‹С€РєР°", "Р“Р°Р·", "Р—Р°РІРѕРґ", "Р¤Р°Р±СЂРёРєР°", "Р­Р»РµРєС‚СЂРѕСЃС‚Р°РЅС†РёСЏ", "РЎРєР»Р°Рґ" },
+        "Utilities" => new[] { "РџРѕРґСЃС‚Р°РЅС†РёСЏ", "Р’РѕРґРѕР±Р°С€РЅСЏ", "РљРѕС‚РµР»СЊРЅР°СЏ", "РљР°РЅР°Р»РёР·Р°С†РёСЏ", "Р“Р°Р·РѕРїСЂРѕРІРѕРґ" },
+        "Services" => new[] { "РџРѕР¶Р°СЂРЅР°СЏ", "РџРѕР»РёС†РёСЏ", "Р‘РѕР»СЊРЅРёС†Р°", "РџРѕР»РёРєР»РёРЅРёРєР°", "РЁРєРѕР»Р°", "РљРѕР»Р»РµРґР¶", "Р’СѓР·" },
+        "Nature" => new[] { "РџР°СЂРє", "Р’РµР»РѕРґРѕСЂРѕР¶РєР°", "РџСЂРѕРіСѓР»РєР°", "РћР·РµР»РµРЅРµРЅРёРµ", "РџСЂСѓРґ" },
+        "Population" => new[] { "Р”РµРјРѕРіСЂР°С„РёСЏ", "Р—Р°РЅСЏС‚РѕСЃС‚СЊ", "РњРёРіСЂР°С†РёСЏ" },
+        "Economy" => new[] { "Р‘СЋРґР¶РµС‚", "РќР°Р»РѕРіРё", "РўРѕСЂРіРѕРІР»СЏ", "Р›РѕРіРёСЃС‚РёРєР°" },
         _ => Array.Empty<string>()
     };
 
-    // обновление ресурсов
+    // РѕР±РЅРѕРІР»РµРЅРёРµ СЂРµСЃСѓСЂСЃРѕРІ
     private void UpdateResourcesPanel()
     {
         if (currentWorld == null) return;
     }
 }
 
-// Сервис сохранений
+// РЎРµСЂРІРёСЃ СЃРѕС…СЂР°РЅРµРЅРёР№
 public class SaveService
 {
     public void Save(World world, string path) { }
