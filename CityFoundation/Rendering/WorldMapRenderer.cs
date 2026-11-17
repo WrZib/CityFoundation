@@ -37,6 +37,7 @@ public class WorldMapRenderer
     private World? currentWorld;
     private CancellationTokenSource? renderCancellation;
     private int renderVersion;
+    private ResourceLayer visibleResourceLayers = ResourceLayer.All;
 
     private bool isDragging;
     private Point lastMousePosition;
@@ -255,6 +256,7 @@ public class WorldMapRenderer
                         .Cells[cellX, cellY];
 
                 Color color = GetTerrainColor(cell);
+                color = ApplyResourceDots(color, cell, x + tile.X * size, y + tile.Y * size);
 
                 color = ApplySlopeShading(
                     color,
@@ -302,6 +304,46 @@ public class WorldMapRenderer
             TerrainType.Mountains => GetMountainColor(cell.Height),
             _ => Colors.Magenta
         };
+    }
+
+    public void SetResourceLayerVisibility(ResourceLayer layer, bool visible)
+    {
+        visibleResourceLayers = visible ? visibleResourceLayers | layer : visibleResourceLayers & ~layer;
+        if (currentWorld != null) SetWorld(currentWorld);
+    }
+
+    private Color ApplyResourceDots(Color baseColor, ChunkCell cell, int x, int y)
+    {
+        if (cell.ResourceDepositId == 0 || currentWorld == null)
+            return baseColor;
+        ResourceDeposit deposit = currentWorld.ResourceDeposits.FirstOrDefault(d => d.Id == cell.ResourceDepositId);
+        if (deposit.Type == ResourceType.Water)
+            return baseColor;
+        ResourceLayer layer = deposit.Type switch
+        {
+            ResourceType.Water => ResourceLayer.Water, ResourceType.Stone => ResourceLayer.Stone,
+            ResourceType.Iron => ResourceLayer.Iron, ResourceType.Copper => ResourceLayer.Copper,
+            ResourceType.Oil => ResourceLayer.Oil, ResourceType.Gas => ResourceLayer.Gas, _ => ResourceLayer.None
+        };
+        if ((visibleResourceLayers & layer) == 0)
+            return baseColor;
+        double dx = x - deposit.CenterX;
+        double dy = y - deposit.CenterY;
+        double distance = Math.Sqrt(dx * dx + dy * dy);
+        double radius = Math.Max(1, deposit.RadiusCells);
+        double centerWeight = Math.Clamp(1 - distance / radius, 0, 1);
+        int hash = Math.Abs((x * 73856093) ^ (y * 19349663) ^ deposit.ShapeSeed);
+        double markerChance = 0.003 + centerWeight * 0.06;
+        double randomValue = Math.Abs(hash % 1000) / 1000.0;
+        if (randomValue > markerChance)
+            return baseColor;
+        Color dot = deposit.Type switch
+        {
+            ResourceType.Stone => Color.FromRgb(115, 115, 115), ResourceType.Iron => Color.FromRgb(188, 65, 45),
+            ResourceType.Copper => Color.FromRgb(199, 117, 53), ResourceType.Oil => Color.FromRgb(30, 30, 30),
+            ResourceType.Gas => Color.FromRgb(150, 100, 220), ResourceType.Water => Color.FromRgb(30, 130, 220), _ => baseColor
+        };
+        return Blend(baseColor, dot, 0.72);
     }
 
     private Color GetWaterColor(float height)

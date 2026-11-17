@@ -115,6 +115,8 @@ public class WorldGenerator
                 .Chunks[localChunkX, localChunkY] = chunk;
         });
 
+        new ResourceGenerator(seed).Generate(world);
+
         return world;
     }
 
@@ -129,7 +131,6 @@ public class WorldGenerator
         bool isLake =
             sample.Elevation < 0.62 &&
             sample.Lake > 0.58;
-
         if (isLake)
         {
             float depth = (float)(

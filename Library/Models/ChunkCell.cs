@@ -13,6 +13,8 @@ public struct ChunkCell
     private byte slope;
     private byte flags;
 
+    public ushort ResourceDepositId { get; set; }
+
     public float Height
     {
         get => height;
@@ -59,6 +61,7 @@ public struct ChunkCell
         this.terrain = 0;
         this.slope = 0;
         flags = 0;
+        ResourceDepositId = 0;
 
         Height = height;
         Terrain = terrain;
