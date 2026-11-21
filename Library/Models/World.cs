@@ -3,6 +3,7 @@ namespace Library.Models;
 
 public class World
 {
+    public RoadNetwork Roads { get; set; } = new();
     public int Seed { get; set; }
 
     public int Width { get; set; } = 5;

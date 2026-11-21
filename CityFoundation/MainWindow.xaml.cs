@@ -93,6 +93,7 @@ public partial class MainWindow : Window
             await Task.Delay(150);
 
             renderer = new WorldMapRenderer(MapViewport, MapContent);
+            renderer.RoadChanged += OnRoadChanged;
 
             // Этот метод блокирует UI-поток (так устроен WorldMapRenderer),
             // но анимация уже запущена и будет отрисована.
@@ -164,6 +165,7 @@ public partial class MainWindow : Window
             await Task.Delay(150);
 
             renderer?.SetWorld(currentWorld!);
+            renderer.RoadChanged += OnRoadChanged;
 
             SetStatus("Мир готов");
             await Task.Delay(300);
@@ -176,6 +178,11 @@ public partial class MainWindow : Window
         {
             ShowLoading(false);
         }
+    }
+    private void OnRoadChanged()
+    {
+        // Хук для автосохранения / пересчёта ресурсов / статистики
+        // Например: SaveService.Save(currentWorld!, automaticSavePath);
     }
 
     private void SaveMenuItem_Click(object sender, RoutedEventArgs e) => SaveWorldWithDialog();
@@ -242,9 +249,23 @@ public partial class MainWindow : Window
         if (_activeCategory == tag)
         {
             SubMenuBorder.Visibility = Visibility.Collapsed;
-            _activeCategory = null; _activeTool = null; return;
+            _activeCategory = null;
+            _activeTool = null;
+            if (renderer != null)
+            {
+                renderer.ActiveRoadType = RoadType.None;
+                renderer.IsEraseMode = false;
+            }
+            return;
         }
-        _activeCategory = tag; _activeTool = null;
+        _activeCategory = tag;
+        _activeTool = null;
+        if (renderer != null)
+        {
+            renderer.ActiveRoadType = RoadType.None;
+            renderer.IsEraseMode = false;
+        }
+
         SubMenuPanel.Children.Clear();
         SubMenuTitle.Text = GetCategoryTitle(tag);
         foreach (var tool in GetToolsForCategory(tag))
@@ -262,6 +283,19 @@ public partial class MainWindow : Window
     {
         if (sender is not Button btn) return;
         _activeTool = btn.Tag?.ToString();
+
+        if (renderer == null) return;
+
+        if (_activeTool == "Снести")
+        {
+            renderer.IsEraseMode = true;
+            renderer.ActiveRoadType = RoadType.None;
+        }
+        else
+        {
+            renderer.IsEraseMode = false;
+            renderer.ActiveRoadType = GetRoadTypeFromTool(_activeTool);
+        }
     }
 
     private static string GetCategoryTitle(string tag) => tag switch
@@ -295,6 +329,14 @@ public partial class MainWindow : Window
     {
         if (currentWorld == null) return;
     }
+
+    private static RoadType GetRoadTypeFromTool(string? tool) => tool switch
+    {
+        "Грунтовая" => RoadType.Dirt,
+        "Асфальт" => RoadType.Asphalt,
+        "Магистраль" => RoadType.Highway,
+        _ => RoadType.None
+    };
 }
 
 // Сервис сохранений

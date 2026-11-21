@@ -14,6 +14,23 @@ namespace CityFoundation.Rendering;
 
 public class WorldMapRenderer
 {
+    //слой с дорогами
+    private RoadLayer? roadLayer;
+    //отдельный canvas поверх карты
+    private Canvas? previewCanvas;
+    //прямоугольник превью
+    private Rectangle? previewRect;
+
+    private bool isDrawingRoad;
+    //координата где зажали ПКМ
+    private int roadStartX, roadStartY;
+    //координата где отжали ПКМ
+    private int roadEndX, roadEndY;
+
+    public RoadType ActiveRoadType { get; set; } = RoadType.None;
+    public bool IsEraseMode { get; set; }
+    public event Action? RoadChanged;
+
     private const double CellPixelSize = 0.5;
 
     private const double MinZoom = 0.3;
@@ -60,6 +77,8 @@ public class WorldMapRenderer
 
         viewport.MouseLeftButtonDown += OnMouseDown;
         viewport.MouseLeftButtonUp += OnMouseUp;
+        viewport.MouseRightButtonDown += OnMouseRightDown;
+        viewport.MouseRightButtonUp += OnMouseRightUp;
         viewport.MouseMove += OnMouseMove;
         viewport.MouseWheel += OnMouseWheel;
 
@@ -103,12 +122,31 @@ public class WorldMapRenderer
                 return;
 
             content.Children.Clear();
-
             constructionGrid = null;
             tileGrid = null;
+            roadLayer = null;
+            previewCanvas = null;
+            previewRect = null;
 
             content.Width = world.TotalCellWidth * CellPixelSize;
             content.Height = world.TotalCellHeight * CellPixelSize;
+
+            //создание слоев
+            double roadCellPx = ConstructionGrid.CellSize * CellPixelSize;
+            
+            roadLayer = new RoadLayer();
+            Panel.SetZIndex(roadLayer, 5);
+            content.Children.Add(roadLayer);
+            roadLayer.Configure(world.Roads, roadCellPx, content.Width, content.Height);
+
+            previewCanvas = new Canvas
+            {
+                Width = content.Width,
+                Height = content.Height,
+                IsHitTestVisible = false
+            };
+            Panel.SetZIndex(previewCanvas, 25);
+            content.Children.Add(previewCanvas);
 
             CenterMap();
 
@@ -513,6 +551,31 @@ public class WorldMapRenderer
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+        if (isDrawingRoad)
+        {
+            var cell = GetConstructionCellFromMouse(e.GetPosition(content));
+            if (cell != null)
+            {
+                // Ограничение 4 направлениями
+                int dx = cell.Value.X - roadStartX;
+                int dy = cell.Value.Y - roadStartY;
+
+                if (Math.Abs(dx) >= Math.Abs(dy))
+                {
+                    roadEndX = cell.Value.X;
+                    roadEndY = roadStartY;
+                }
+                else
+                {
+                    roadEndX = roadStartX;
+                    roadEndY = cell.Value.Y;
+                }
+
+                UpdateRoadPreview();
+            }
+            return;
+        }
+
         if (!isDragging)
             return;
 
@@ -551,5 +614,105 @@ public class WorldMapRenderer
 
         ClampTranslation();
         UpdateLod();
+    }
+
+    private void OnMouseRightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (currentWorld == null) return;
+        if (!IsEraseMode && ActiveRoadType == RoadType.None) return;
+
+        var cell = GetConstructionCellFromMouse(e.GetPosition(content));
+        if (cell == null) return;
+
+        isDrawingRoad = true;
+        roadStartX = cell.Value.X;
+        roadStartY = cell.Value.Y;
+        roadEndX = roadStartX;
+        roadEndY = roadStartY;
+
+        viewport.CaptureMouse();
+        UpdateRoadPreview();
+        e.Handled = true;
+    }
+
+    private void OnMouseRightUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!isDrawingRoad) return;
+
+        isDrawingRoad = false;
+        viewport.ReleaseMouseCapture();
+        ClearRoadPreview();
+
+        if (currentWorld != null)
+        {
+            if (IsEraseMode)
+            {
+                if (roadStartX == roadEndX && roadStartY == roadEndY)
+                    currentWorld.Roads.RemoveRoad(roadStartX, roadStartY);   // одиночный клик - вся клетка
+                else
+                    currentWorld.Roads.EraseSegment(roadStartX, roadStartY, roadEndX, roadEndY);  // протяжка — по оси
+            }
+            else if (ActiveRoadType != RoadType.None)
+            {
+                currentWorld.Roads.DrawSegment(roadStartX, roadStartY, roadEndX, roadEndY, ActiveRoadType);
+            }
+
+            roadLayer?.Refresh();
+            RoadChanged?.Invoke();
+        }
+        e.Handled = true;
+    }
+
+    private (int X, int Y)? GetConstructionCellFromMouse(Point contentPoint)
+    {
+        if (currentWorld == null) return null;
+
+        double cellPx = ConstructionGrid.CellSize * CellPixelSize;
+        int cx = (int)(contentPoint.X / cellPx);
+        int cy = (int)(contentPoint.Y / cellPx);
+
+        int cols = (int)Math.Ceiling(currentWorld.TotalCellWidth / (double)ConstructionGrid.CellSize);
+        int rows = (int)Math.Ceiling(currentWorld.TotalCellHeight / (double)ConstructionGrid.CellSize);
+
+        if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return null;
+        return (cx, cy);
+    }
+
+    private void UpdateRoadPreview()
+    {
+        ClearRoadPreview();
+        if (previewCanvas == null) return;
+
+        int minX = Math.Min(roadStartX, roadEndX);
+        int maxX = Math.Max(roadStartX, roadEndX);
+        int minY = Math.Min(roadStartY, roadEndY);
+        int maxY = Math.Max(roadStartY, roadEndY);
+
+        //размер одной строительной клетки
+        double cellPx = ConstructionGrid.CellSize * CellPixelSize;
+        //при стирании красный цвет при рисовании голубой
+        Color fillColor = IsEraseMode ? Color.FromArgb(160, 220, 50, 50) : Color.FromArgb(160, 59, 130, 246);
+
+        previewRect = new Rectangle
+        {
+            Width = (maxX - minX + 1) * cellPx,
+            Height = (maxY - minY + 1) * cellPx,
+            Fill = new SolidColorBrush(fillColor),
+            //нет рамки
+            Stroke = null,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(previewRect, minX * cellPx);
+        Canvas.SetTop(previewRect, minY * cellPx);
+        previewCanvas.Children.Add(previewRect);
+    }
+
+    private void ClearRoadPreview()
+    {
+        if (previewRect != null && previewCanvas != null)
+        {
+            previewCanvas.Children.Remove(previewRect);
+            previewRect = null;
+        }
     }
 }
